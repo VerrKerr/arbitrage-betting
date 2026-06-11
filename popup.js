@@ -3,14 +3,8 @@ const ODDS_MIN = 1.01;
 const ODDS_MAX = 100;
 const MAX_COMBINATIONS_TO_CHECK = 250000;
 const MAX_ARBITRAGE_RESULTS = 50;
-const MARKET_DISPLAY_ORDER = ["1x2", "1x2-1up", "draw-no-bet", "double-chance"];
+const MARKET_DISPLAY_ORDER = ["1x2"];
 const ALLOWED_MARKET_DEFINITIONS = [
-  {
-    key: "1x2-1up",
-    title: "1x2 (1UP) Odds",
-    validSearchModes: [3],
-    patterns: [/\b1\s*x\s*2\s*\(?\s*1\s*up\s*\)?/i]
-  },
   {
     key: "1x2",
     title: "1x2 Odds",
@@ -22,18 +16,6 @@ const ALLOWED_MARKET_DEFINITIONS = [
       /\bmatch\s*result\b/i,
       /\bregular\s*time\s*result\b/i
     ]
-  },
-  {
-    key: "double-chance",
-    title: "Double Chance Odds",
-    validSearchModes: [2],
-    patterns: [/\bdouble\s*chance\b/i, /\b1x\b/i, /\bx2\b/i, /(^|\s)12(\s|$)/]
-  },
-  {
-    key: "draw-no-bet",
-    title: "Draw No Bet Odds",
-    validSearchModes: [2],
-    patterns: [/\bdraw\s*no\s*bet\b/i, /\bdnb\b/i]
   }
 ];
 const RESTRICTED_MARKET_PATTERNS = [
@@ -56,7 +38,14 @@ const RESTRICTED_MARKET_PATTERNS = [
   /\bbtts\b/i,
   /\basian\s*handicap\b/i,
   /\basian\s*total\b/i,
+  /\b1\s*x\s*2\s*\(?\s*1\s*up\s*\)?/i,
   /\b1\s*x\s*2\s*\(?\s*2\s*up\s*\)?/i,
+  /\bdouble\s*chance\b/i,
+  /\bdraw\s*no\s*bet\b/i,
+  /\bdnb\b/i,
+  /\b1x\b/i,
+  /\bx2\b/i,
+  /(^|\s)12(\s|$)/,
   /\bmatch\s*winner\b/i,
   /\bgame\s*winner\b/i,
   /\bmoney\s*line\b/i,
@@ -77,7 +66,7 @@ const RESTRICTED_MARKET_PATTERNS = [
 ];
 
 const state = {
-  mode: 2,
+  mode: 3,
   detectedOdds: [],
   detectedGroups: [],
   scannedTabs: [],
@@ -437,6 +426,7 @@ function extractGroupedDecimalOdds(text) {
     .map((line) => line.trim())
     .filter(Boolean);
   let currentMarket = null;
+  let currentMarketOddsCount = 0;
   let pendingLabels = [];
   let occurrenceIndex = 0;
   let suppressAllowedHeadingLinesRemaining = 0;
@@ -447,6 +437,7 @@ function extractGroupedDecimalOdds(text) {
 
     if (marketState.type === "restricted") {
       currentMarket = null;
+      currentMarketOddsCount = 0;
       pendingLabels = [];
       suppressAllowedHeadingLinesRemaining = marketState.category === "half-time" ? 4 : 0;
       suppressedContentLinesRemaining = 0;
@@ -456,6 +447,7 @@ function extractGroupedDecimalOdds(text) {
     if (suppressedContentLinesRemaining > 0 && marketState.type !== "allowed") {
       suppressedContentLinesRemaining -= 1;
       currentMarket = null;
+      currentMarketOddsCount = 0;
       pendingLabels = [];
       return;
     }
@@ -467,6 +459,7 @@ function extractGroupedDecimalOdds(text) {
     if (marketState.type === "allowed") {
       if (suppressAllowedHeadingLinesRemaining > 0 && isGenericAllowedHeading(line)) {
         currentMarket = null;
+        currentMarketOddsCount = 0;
         pendingLabels = [];
         suppressAllowedHeadingLinesRemaining = 0;
         suppressedContentLinesRemaining = getSuppressedContentLineCount(marketState.market.key);
@@ -476,6 +469,7 @@ function extractGroupedDecimalOdds(text) {
       suppressAllowedHeadingLinesRemaining = 0;
       suppressedContentLinesRemaining = 0;
       currentMarket = marketState.market;
+      currentMarketOddsCount = 0;
       pendingLabels = [];
     }
 
@@ -492,9 +486,28 @@ function extractGroupedDecimalOdds(text) {
       return;
     }
 
-    odds.forEach((item) => {
+    const remainingOdds = getMaxOddsForMarket(currentMarket.key) - currentMarketOddsCount;
+
+    if (remainingOdds <= 0) {
+      currentMarket = null;
+      currentMarketOddsCount = 0;
+      pendingLabels = [];
+      return;
+    }
+
+    const oddsToAdd = odds.slice(0, remainingOdds);
+
+    oddsToAdd.forEach((item) => {
       addOddsToGroup(groups, currentMarket, item);
     });
+
+    currentMarketOddsCount += oddsToAdd.length;
+
+    if (currentMarketOddsCount >= getMaxOddsForMarket(currentMarket.key)) {
+      currentMarket = null;
+      currentMarketOddsCount = 0;
+      pendingLabels = [];
+    }
   });
 
   return Array.from(groups.values())
@@ -573,11 +586,11 @@ function isGenericAllowedHeading(line) {
 }
 
 function getSuppressedContentLineCount(marketKey) {
-  if (marketKey === "draw-no-bet") {
-    return 4;
-  }
+  return getMaxOddsForMarket(marketKey) * 2;
+}
 
-  return 6;
+function getMaxOddsForMarket(marketKey) {
+  return marketKey === "1x2" ? 3 : Number.POSITIVE_INFINITY;
 }
 
 function extractOddsFromText(text, pendingLabels = [], occurrenceIndexStart = 0) {
@@ -1072,7 +1085,7 @@ function renderDetectedOdds() {
 
   if (state.detectedOdds.length === 0) {
     elements.detectedOdds.className = "odds-grid empty-state";
-    elements.detectedOdds.textContent = "Scan a page to detect allowed markets: 1x2, 1x2 (1UP), Draw no bet, or Double Chance.";
+    elements.detectedOdds.textContent = "Scan a page to detect 1x2 odds only.";
     return;
   }
 
@@ -1411,7 +1424,7 @@ function createMetric(label, value) {
 }
 
 function reset() {
-  state.mode = 2;
+  state.mode = 3;
   state.detectedOdds = [];
   state.detectedGroups = [];
   state.scannedTabs = [];

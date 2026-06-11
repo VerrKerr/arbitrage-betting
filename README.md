@@ -30,11 +30,11 @@ If the target page was already open before installing the extension, reload that
 1. Open the relevant event or market page in Chrome.
 2. Open the extension popup.
 3. Click Scan Current Tab for one page, or open matching event pages in the same Chrome window and click Scan Open Tabs.
-4. Review the allowed grouped betting-type sections: 1x2 Odds, 1x2 (1UP) Odds, Draw No Bet Odds, and Double Chance Odds. Each chip is shown as selection initials plus odds and source, for example `M : 1.08` for Mexico or `MoD : 1.12` for Mexico or Draw.
-5. Select 2 or 3 detected odds from the exact same event and exact same market.
+4. Review the detected 1x2 Odds section. Each chip is shown as selection initials plus odds and source, for example `M : 1.08` for Mexico.
+5. Select the 3 detected 1x2 odds from the exact same event and exact same market.
 6. Edit selected odds if needed.
 7. Enter total amount.
-8. Click Calculate for manually selected odds, or click Find Arbitrage to search scanned odds in the current 2-way or 3-way mode.
+8. Click Calculate for manually selected odds, or click Find Arbitrage to search scanned 1x2 odds in 3-way mode.
 9. For Find Arbitrage results, manually verify every candidate is from the exact same event, exact same market, and all required outcomes before using the displayed amount split.
 10. Recalculate after every odds change.
 
@@ -44,12 +44,12 @@ If the target page was already open before installing the extension, reload that
 
 1. Load the extension in Chrome using Load Unpacked.
 2. Open a page with visible decimal odds.
-3. Click Scan Current Tab and confirm decimal odds appear left-to-right as selection chips grouped only under the allowed betting-type headings.
+3. Click Scan Current Tab and confirm decimal odds appear left-to-right as selection chips grouped only under the 1x2 heading.
 4. Open multiple matching event pages in the same Chrome window, click Scan Open Tabs, and confirm source names appear on detected chips and candidates.
 5. Switch between 2-way and 3-way mode and confirm the selected odds count changes.
 6. Select odds, edit one selected odd, enter a total amount, and click Calculate.
 7. Confirm the result shows arbitrage YES/NO, implied probability, amount split, gross returns, guaranteed gross return, and ROI.
-8. Click Find Arbitrage after entering a total amount and confirm it lists positive guaranteed arbitrage candidates when the scanned odds contain a qualifying 2-way or 3-way combination.
+8. Click Find Arbitrage after entering a total amount and confirm it lists positive guaranteed arbitrage candidates when the scanned odds contain a qualifying 3-way 1x2 combination.
 9. Click Use on a candidate and confirm it loads into the selected odds calculator.
 10. Try invalid inputs:
    - No selected odds.
@@ -59,7 +59,7 @@ If the target page was already open before installing the extension, reload that
 
 ## Find Arbitrage
 
-Find Arbitrage searches every generated combination inside compatible detected betting-type sections. In 2-way mode it searches Draw No Bet and Double Chance. In 3-way mode it searches 1x2 and 1x2 (1UP). It first checks `arb_sum = sum(1 / odds)` for each eligible combination. Only combinations where `arb_sum < 1` move on to amount-split and ROI calculation. After Scan Open Tabs, candidates must use at least two different source sites.
+Find Arbitrage searches every generated 3-way combination inside detected 1x2 sections. It first checks `arb_sum = sum(1 / odds)` for each eligible combination. Only combinations where `arb_sum < 1` move on to amount-split and ROI calculation. After Scan Open Tabs, candidates must use at least two different source sites.
 
 The search is intentionally scoped to detected betting-type sections because page text does not reliably expose event boundaries across sites. A candidate can still be invalid if the odds are from different events, similar-but-different markets, suspended markets, or incomplete outcomes. Always verify before acting outside the extension.
 
@@ -67,12 +67,9 @@ The search is intentionally scoped to detected betting-type sections because pag
 
 The extension uses `tabs`, `activeTab`, `scripting`, and `http/https` host permissions so Scan Open Tabs can inject the local content script into open pages in the current Chrome window after you click the button. It does not run a background scanner, store scanned data, or send scanned data anywhere.
 
-Allowed scan and Find Arbitrage markets:
+Allowed scan and Find Arbitrage market:
 
 - 1x2
-- 1x2 (1UP)
-- Draw no bet
-- Double Chance
 
 Restricted markets ignored by scan and Find Arbitrage:
 
@@ -82,7 +79,10 @@ Restricted markets ignored by scan and Find Arbitrage:
 - 1x2 and Both Teams to Score
 - Asian Handicap
 - Asian Total
+- 1x2 (1UP)
 - 1x2 (2UP)
+- Draw no bet
+- Double Chance
 
 ## Calculation
 
