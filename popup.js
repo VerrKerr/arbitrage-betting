@@ -11,6 +11,7 @@ const ALLOWED_MARKET_DEFINITIONS = [
     validSearchModes: [3],
     patterns: [
       /^(ft\s+)?1\s*x\s*2(\s+odds)?$/i,
+      /^(ft\s+)?1\s*x\s*2(?:\s*(?:\([^)]*\)|account\b.*|open\b.*|closed\b.*|suspended\b.*|available\b.*))*$/i,
       /^1\s*x\s*2\s*\(?\s*full\s*time\s*\)?$/i,
       /^full\s*time\s+1\s*x\s*2$/i,
       /^3[-\s]?way(\s+odds)?$/i,
