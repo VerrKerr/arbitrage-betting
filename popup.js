@@ -10,11 +10,13 @@ const ALLOWED_MARKET_DEFINITIONS = [
     title: "1x2 Odds",
     validSearchModes: [3],
     patterns: [
-      /\b1\s*x\s*2\b/i,
-      /\b3[-\s]?way\b/i,
-      /\bfull\s*time\s*result\b/i,
-      /\bmatch\s*result\b/i,
-      /\bregular\s*time\s*result\b/i
+      /^(ft\s+)?1\s*x\s*2(\s+odds)?$/i,
+      /^1\s*x\s*2\s*\(?\s*full\s*time\s*\)?$/i,
+      /^full\s*time\s+1\s*x\s*2$/i,
+      /^3[-\s]?way(\s+odds)?$/i,
+      /^full\s*time\s*result(\s+odds)?$/i,
+      /^match\s*result(\s+odds)?$/i,
+      /^regular\s*time\s*result(\s+odds)?$/i
     ]
   }
 ];
@@ -426,7 +428,7 @@ function extractGroupedDecimalOdds(text) {
     .map((line) => line.trim())
     .filter(Boolean);
   let currentMarket = null;
-  let currentMarketOddsCount = 0;
+  let currentMarketOddsBuffer = [];
   let pendingLabels = [];
   let occurrenceIndex = 0;
   let suppressAllowedHeadingLinesRemaining = 0;
@@ -437,7 +439,7 @@ function extractGroupedDecimalOdds(text) {
 
     if (marketState.type === "restricted") {
       currentMarket = null;
-      currentMarketOddsCount = 0;
+      currentMarketOddsBuffer = [];
       pendingLabels = [];
       suppressAllowedHeadingLinesRemaining = marketState.category === "half-time" ? 4 : 0;
       suppressedContentLinesRemaining = 0;
@@ -447,7 +449,7 @@ function extractGroupedDecimalOdds(text) {
     if (suppressedContentLinesRemaining > 0 && marketState.type !== "allowed") {
       suppressedContentLinesRemaining -= 1;
       currentMarket = null;
-      currentMarketOddsCount = 0;
+      currentMarketOddsBuffer = [];
       pendingLabels = [];
       return;
     }
@@ -459,7 +461,7 @@ function extractGroupedDecimalOdds(text) {
     if (marketState.type === "allowed") {
       if (suppressAllowedHeadingLinesRemaining > 0 && isGenericAllowedHeading(line)) {
         currentMarket = null;
-        currentMarketOddsCount = 0;
+        currentMarketOddsBuffer = [];
         pendingLabels = [];
         suppressAllowedHeadingLinesRemaining = 0;
         suppressedContentLinesRemaining = getSuppressedContentLineCount(marketState.market.key);
@@ -469,7 +471,7 @@ function extractGroupedDecimalOdds(text) {
       suppressAllowedHeadingLinesRemaining = 0;
       suppressedContentLinesRemaining = 0;
       currentMarket = marketState.market;
-      currentMarketOddsCount = 0;
+      currentMarketOddsBuffer = [];
       pendingLabels = [];
     }
 
@@ -486,26 +488,23 @@ function extractGroupedDecimalOdds(text) {
       return;
     }
 
-    const remainingOdds = getMaxOddsForMarket(currentMarket.key) - currentMarketOddsCount;
+    const remainingOdds = getMaxOddsForMarket(currentMarket.key) - currentMarketOddsBuffer.length;
 
     if (remainingOdds <= 0) {
       currentMarket = null;
-      currentMarketOddsCount = 0;
+      currentMarketOddsBuffer = [];
       pendingLabels = [];
       return;
     }
 
     const oddsToAdd = odds.slice(0, remainingOdds);
 
-    oddsToAdd.forEach((item) => {
-      addOddsToGroup(groups, currentMarket, item);
-    });
+    currentMarketOddsBuffer.push(...oddsToAdd);
 
-    currentMarketOddsCount += oddsToAdd.length;
-
-    if (currentMarketOddsCount >= getMaxOddsForMarket(currentMarket.key)) {
+    if (currentMarketOddsBuffer.length >= getMaxOddsForMarket(currentMarket.key)) {
+      addValidatedOddsToGroup(groups, currentMarket, currentMarketOddsBuffer);
       currentMarket = null;
-      currentMarketOddsCount = 0;
+      currentMarketOddsBuffer = [];
       pendingLabels = [];
     }
   });
@@ -591,6 +590,46 @@ function getSuppressedContentLineCount(marketKey) {
 
 function getMaxOddsForMarket(marketKey) {
   return marketKey === "1x2" ? 3 : Number.POSITIVE_INFINITY;
+}
+
+function addValidatedOddsToGroup(groups, market, oddsList) {
+  if (market.key === "1x2" && !isValidOneXTwoOddsSet(oddsList)) {
+    return;
+  }
+
+  oddsList.forEach((item) => {
+    addOddsToGroup(groups, market, item);
+  });
+}
+
+function isValidOneXTwoOddsSet(oddsList) {
+  if (oddsList.length !== 3) {
+    return false;
+  }
+
+  const normalizedLabels = oddsList.map((odds) => normalizeOutcomeKey(odds.outcomeLabel || ""));
+  const hasDrawOutcome = normalizedLabels.some((label) =>
+    ["draw", "x", "tie", "d"].includes(label)
+  );
+
+  if (!hasDrawOutcome) {
+    return false;
+  }
+
+  return oddsList.every((odds) => !isNonOneXTwoOutcomeLabel(odds.outcomeLabel || ""));
+}
+
+function isNonOneXTwoOutcomeLabel(label) {
+  const cleaned = label.replace(/\s+/g, " ").trim();
+
+  if (!cleaned) {
+    return true;
+  }
+
+  return (
+    /\b(asian|handicap|hdp|spread|total|over|under|corner|corners|card|cards|correct|score|goalscorer|btts|both\s+teams|double\s+chance|draw\s+no\s+bet)\b/i.test(cleaned) ||
+    /(^|\s)[+-]\d+(\.\d+)?(\s|$)/.test(cleaned)
+  );
 }
 
 function extractOddsFromText(text, pendingLabels = [], occurrenceIndexStart = 0) {
