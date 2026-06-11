@@ -565,18 +565,30 @@ function detectMarketState(line) {
 }
 
 function getRestrictedMarketCategory(cleaned) {
-  if (
-    /\bhalf[-\s]?time\s*\/\s*full[-\s]?time\b/i.test(cleaned) ||
-    /\bhalf\s*time\s+full\s*time\b/i.test(cleaned) ||
-    /\bht\s*\/\s*ft\b/i.test(cleaned) ||
-    /\bhalf[-\s]?time\b/i.test(cleaned) ||
-    /\b1st\s*half\b/i.test(cleaned) ||
-    /\bfirst\s*half\b/i.test(cleaned)
-  ) {
-    return "half-time";
+  if (isHalfTimeMarketLine(cleaned)) {
+    return isHalfTimeOneXTwoContext(cleaned) ? "half-time" : "restricted";
   }
 
   return RESTRICTED_MARKET_PATTERNS.some((pattern) => pattern.test(cleaned)) ? "restricted" : "";
+}
+
+function isHalfTimeMarketLine(cleaned) {
+  return (
+    /\bhalf[-\s]?time\b/i.test(cleaned) ||
+    /\b1st\s*half\b/i.test(cleaned) ||
+    /\bfirst\s*half\b/i.test(cleaned) ||
+    /\bht\s*\/\s*ft\b/i.test(cleaned)
+  );
+}
+
+function isHalfTimeOneXTwoContext(cleaned) {
+  const normalized = cleaned.replace(/\s+/g, " ").trim();
+
+  return (
+    /^(?:\d+\s*\|\s*)?(?:half[-\s]?time|1st\s*half|first\s*half)$/i.test(normalized) ||
+    /\b(?:half[-\s]?time|1st\s*half|first\s*half)\s+1\s*x\s*2\b/i.test(normalized) ||
+    /\b1\s*x\s*2\s+(?:half[-\s]?time|1st\s*half|first\s*half)\b/i.test(normalized)
+  );
 }
 
 function isGenericAllowedHeading(line) {
