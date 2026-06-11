@@ -1,4 +1,4 @@
-# Arbitrage Calculator
+# Football Arbitrage Calculator
 
 Private Chrome Extension Manifest V3 calculator for visible decimal odds.
 
@@ -37,6 +37,8 @@ If the target page was already open before installing the extension, reload that
 8. Click Calculate for manually selected odds, or click Find Arbitrage to search scanned odds in the current 2-way or 3-way mode.
 9. For Find Arbitrage results, manually verify every candidate is from the exact same event, exact same market, and all required outcomes before using the displayed amount split.
 10. Recalculate after every odds change.
+
+*IMPORTANT NOTE : Works best for Football odds (as of now)*
 
 ## Testing
 
