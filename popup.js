@@ -420,11 +420,17 @@ function extractDecimalOdds(text) {
 }
 
 function extractGroupedDecimalOdds(text) {
-  const groups = new Map();
   const lines = text
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
+  const numberedOneXTwoGroup = extractNumberedOneXTwoGroup(lines);
+
+  if (numberedOneXTwoGroup) {
+    return [numberedOneXTwoGroup];
+  }
+
+  const groups = new Map();
   let currentMarket = null;
   let currentMarketOddsCount = 0;
   let pendingLabels = [];
@@ -523,6 +529,120 @@ function extractGroupedDecimalOdds(text) {
     .map(({ firstSeen: _firstSeen, ...group }) => group);
 }
 
+function extractNumberedOneXTwoGroup(lines) {
+  let halfTimeOneXTwoLinesRemaining = 0;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const cleaned = line.replace(/\s+/g, " ").trim();
+
+    if (isHalfTimeOneXTwoContext(cleaned)) {
+      halfTimeOneXTwoLinesRemaining = 8;
+      continue;
+    }
+
+    if (isExactFullTimeOneXTwoHeading(cleaned)) {
+      if (halfTimeOneXTwoLinesRemaining > 0) {
+        halfTimeOneXTwoLinesRemaining = 0;
+        continue;
+      }
+
+      const odds = collectOddsAfterNumberedOneXTwoHeading(lines, index + 1);
+
+      if (odds.length === 3) {
+        return buildSingleMarketGroup(ALLOWED_MARKET_DEFINITIONS[0], odds);
+      }
+    }
+
+    if (halfTimeOneXTwoLinesRemaining > 0) {
+      halfTimeOneXTwoLinesRemaining -= 1;
+    }
+  }
+
+  return null;
+}
+
+function isExactFullTimeOneXTwoHeading(cleaned) {
+  return /^(?:\d{1,3}\s*\|\s*)?1\s*x\s*2(?:\s+odds)?$/i.test(cleaned);
+}
+
+function collectOddsAfterNumberedOneXTwoHeading(lines, startIndex) {
+  const odds = [];
+  let pendingLabel = "";
+
+  for (let index = startIndex; index < lines.length && odds.length < 3; index += 1) {
+    const line = lines[index];
+    const cleaned = line.replace(/\s+/g, " ").trim();
+
+    if (!cleaned) {
+      continue;
+    }
+
+    if (odds.length > 0 && detectMarketState(cleaned).type !== "none") {
+      break;
+    }
+
+    if (/^\d{1,3}$/.test(cleaned)) {
+      continue;
+    }
+
+    const lineOdds = extractOddsFromText(line, [], odds.length);
+
+    if (lineOdds.length > 0) {
+      lineOdds.forEach((item) => {
+        if (odds.length >= 3) {
+          return;
+        }
+
+        const extractedLabel = cleanNumberedOutcomeLabel(item.outcomeLabel);
+        const outcomeLabel = (isGeneratedOutcomeLabel(extractedLabel) ? "" : extractedLabel) || pendingLabel || item.outcomeLabel;
+
+        odds.push({
+          ...item,
+          firstSeen: odds.length,
+          outcomeLabel,
+          outcomeInitials: initialsForOutcome(outcomeLabel),
+          outcomeKey: normalizeOutcomeKey(outcomeLabel)
+        });
+      });
+
+      pendingLabel = "";
+      continue;
+    }
+
+    const label = cleanNumberedOutcomeLabel(line);
+
+    if (label && isPotentialOutcomeLabel(label)) {
+      pendingLabel = label;
+    }
+  }
+
+  return odds;
+}
+
+function cleanNumberedOutcomeLabel(rawLabel) {
+  return cleanOutcomeLabel(rawLabel).replace(/^\d{1,3}\s+/, "").trim();
+}
+
+function isGeneratedOutcomeLabel(label) {
+  return /^outcome\s+\d+$/i.test(label);
+}
+
+function buildSingleMarketGroup(market, odds) {
+  const groups = new Map();
+
+  odds.forEach((item) => {
+    addOddsToGroup(groups, market, item);
+  });
+
+  return Array.from(groups.values()).map((group) => ({
+    key: group.key,
+    title: group.title,
+    validSearchModes: group.validSearchModes,
+    odds: Array.from(group.odds.values()).sort((a, b) => a.firstSeen - b.firstSeen)
+  }))[0];
+}
+
 function sortMarketGroups(a, b) {
   return getMarketDisplayIndex(a.key) - getMarketDisplayIndex(b.key) || a.firstSeen - b.firstSeen;
 }
@@ -594,7 +714,7 @@ function isHalfTimeOneXTwoContext(cleaned) {
 function isGenericAllowedHeading(line) {
   const cleaned = line.replace(/\s+/g, " ").trim();
 
-  return /^(1\s*x\s*2(\s*\(?\s*1\s*up\s*\)?)?|double\s*chance|draw\s*no\s*bet|dnb)$/i.test(cleaned);
+  return /^(?:\d{1,3}\s*\|\s*)?(1\s*x\s*2(\s*\(?\s*1\s*up\s*\)?)?|double\s*chance|draw\s*no\s*bet|dnb)$/i.test(cleaned);
 }
 
 function getSuppressedContentLineCount(marketKey) {
