@@ -59,7 +59,7 @@ If the target page was already open before installing the extension, reload that
 
 ## Find Arbitrage
 
-Find Arbitrage searches combinations only inside compatible detected betting-type sections. In 2-way mode it searches Draw No Bet and Double Chance. In 3-way mode it searches 1x2 and 1x2 (1UP). It checks combinations across different extracted selection labels, so two selections with the same decimal odds are still treated separately when their labels differ. After Scan Open Tabs, candidates must use at least two different source sites. It ranks positive guaranteed ROI candidates after rounded amounts.
+Find Arbitrage searches every generated combination inside compatible detected betting-type sections. In 2-way mode it searches Draw No Bet and Double Chance. In 3-way mode it searches 1x2 and 1x2 (1UP). It first checks `arb_sum = sum(1 / odds)` for each eligible combination. Only combinations where `arb_sum < 1` move on to amount-split and ROI calculation. After Scan Open Tabs, candidates must use at least two different source sites.
 
 The search is intentionally scoped to detected betting-type sections because page text does not reliably expose event boundaries across sites. A candidate can still be invalid if the odds are from different events, similar-but-different markets, suspended markets, or incomplete outcomes. Always verify before acting outside the extension.
 
@@ -92,7 +92,7 @@ For decimal odds:
 implied_probability = 1 / decimal_odds
 ```
 
-Arbitrage exists when:
+For Find Arbitrage, `arb_sum` is the same value as total implied probability. Arbitrage exists when:
 
 ```text
 sum_implied_probabilities < 1

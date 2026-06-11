@@ -305,9 +305,10 @@ function addSourceToGroups(groups, source) {
   return groups.map((group) => ({
     ...group,
     source,
-    odds: group.odds.map((odds) => ({
+    odds: group.odds.map((odds, oddsIndex) => ({
       ...odds,
       id: `${source.id}-${odds.id}`,
+      outcomeRole: getOutcomeRole(group.key, odds, oddsIndex),
       sourceId: source.id,
       sourceOrder: source.order,
       sourceName: source.name,
@@ -373,6 +374,32 @@ function getSourceKey(odds) {
 
 function getDistinctSourceCount(sources) {
   return new Set(sources.map((source) => source.host || source.name || source.id)).size;
+}
+
+function getOutcomeRole(marketKey, odds, oddsIndex) {
+  const normalizedLabel = normalizeOutcomeKey(odds.outcomeLabel || "");
+
+  if (marketKey === "1x2" || marketKey === "1x2-1up") {
+    if (normalizedLabel === "draw") {
+      return "draw";
+    }
+
+    return ["home", "draw", "away"][oddsIndex % 3];
+  }
+
+  if (marketKey === "draw-no-bet") {
+    return ["home", "away"][oddsIndex % 2];
+  }
+
+  if (marketKey === "double-chance") {
+    return ["home-draw", "home-away", "draw-away"][oddsIndex % 3];
+  }
+
+  return odds.outcomeKey || normalizedLabel || `outcome-${oddsIndex + 1}`;
+}
+
+function getOutcomeComboKey(odds) {
+  return odds.outcomeRole || odds.outcomeKey;
 }
 
 function extractDecimalOdds(text) {
@@ -812,12 +839,13 @@ function findArbitrageCandidates() {
 
   const candidates = [];
   let combinationsChecked = 0;
+  let eligibleCombinations = 0;
 
   searchGroups.forEach((group) => {
-    const seenOddsSets = new Set();
-
     forEachCombination(group.searchOdds, state.mode, (combo) => {
-      const outcomeKeys = new Set(combo.map((odds) => odds.outcomeKey));
+      combinationsChecked += 1;
+
+      const outcomeKeys = new Set(combo.map(getOutcomeComboKey));
 
       if (outcomeKeys.size !== state.mode) {
         return;
@@ -829,23 +857,16 @@ function findArbitrageCandidates() {
         return;
       }
 
-      const oddsKey = combo
-        .map((odds) => `${odds.sourceId || "current"}:${odds.outcomeKey}:${odds.label}`)
-        .sort()
-        .join("|");
+      eligibleCombinations += 1;
 
-      if (seenOddsSets.has(oddsKey)) {
+      const oddsValues = combo.map((odds) => odds.value);
+      const arbSum = calculateArbSum(oddsValues);
+
+      if (arbSum >= 1) {
         return;
       }
 
-      seenOddsSets.add(oddsKey);
-      combinationsChecked += 1;
-
-      const calculation = computeArbitrage(combo.map((odds) => odds.value), totalAmount);
-
-      if (!calculation.arbitrage || calculation.guaranteedReturn <= totalAmount) {
-        return;
-      }
+      const calculation = computeArbitrage(oddsValues, totalAmount);
 
       candidates.push({
         groupKey: group.key,
@@ -863,7 +884,11 @@ function findArbitrageCandidates() {
   );
 
   state.arbitrageCandidates = candidates;
-  renderArbitrageSearchResults(candidates, combinationsChecked, totalAmount);
+  renderArbitrageSearchResults(candidates, combinationsChecked, eligibleCombinations);
+}
+
+function calculateArbSum(odds) {
+  return odds.reduce((sum, value) => sum + (1 / value), 0);
 }
 
 function computeArbitrage(odds, totalAmount) {
@@ -1162,7 +1187,7 @@ function renderResults(result, outcomeItems = []) {
   }
 }
 
-function renderArbitrageSearchResults(candidates, combinationsToCheck, totalAmount) {
+function renderArbitrageSearchResults(candidates, combinationsChecked, eligibleCombinations) {
   const displayedCandidates = candidates.slice(0, MAX_ARBITRAGE_RESULTS);
   const bestCandidate = candidates[0];
 
@@ -1184,9 +1209,9 @@ function renderArbitrageSearchResults(candidates, combinationsToCheck, totalAmou
   const metrics = document.createElement("div");
   metrics.className = "result-grid";
   metrics.append(
-    createMetric("Checked", combinationsToCheck.toLocaleString()),
+    createMetric("Checked", combinationsChecked.toLocaleString()),
+    createMetric("Eligible", eligibleCombinations.toLocaleString()),
     createMetric("Displayed", `${displayedCandidates.length} / ${candidates.length}`),
-    createMetric("Mode", `${state.mode}-way`),
     createMetric("Best ROI", bestCandidate ? `${bestCandidate.calculation.roi.toFixed(2)}%` : "None")
   );
   elements.results.append(metrics);
@@ -1194,14 +1219,14 @@ function renderArbitrageSearchResults(candidates, combinationsToCheck, totalAmou
   if (candidates.length === 0) {
     const empty = document.createElement("div");
     empty.className = "warning-box";
-    empty.textContent = `No positive guaranteed arbitrage candidates were found for the scanned ${state.mode}-way combinations.`;
+    empty.textContent = `No ${state.mode}-way combinations with arb_sum below 1 were found after the allowed-market, outcome, and source-site checks.`;
     elements.results.append(empty);
     return;
   }
 
   const warning = document.createElement("div");
   warning.className = "warning-box";
-  warning.textContent = "These are math-only candidates from visible text. Verify every candidate is from the exact same event, exact same market, and all required outcomes before using the amount split.";
+  warning.textContent = "These are math-only candidates where arb_sum is below 1. ROI uses rounded displayed amounts, so tiny totals can remove visible profit. Verify every candidate is from the exact same event, exact same market, and all required outcomes before using the amount split.";
   elements.results.append(warning);
 
   const list = document.createElement("div");
