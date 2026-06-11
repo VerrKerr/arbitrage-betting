@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Stake Arbitrage Calculator</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">Private calculator</p>
+          <h1>Stake Arbitrage</h1>
+        </div>
+        <button id="resetButton" class="icon-button" type="button" title="Reset">Reset</button>
+      </header>
+
+      <section class="risk-panel" aria-label="Risk controls">
+        <p>This tool only calculates stakes and does not place bets.</p>
+        <ul>
+          <li>Odds can move before bets are placed.</li>
+          <li>Check all selected odds are from the exact same event and exact same market.</li>
+          <li>Do not mix similar but different markets.</li>
+          <li>Check limits before placing the first bet.</li>
+          <li>Check whether the market is suspended.</li>
+          <li>Recalculate after every odds change.</li>
+        </ul>
+      </section>
+
+      <section class="panel">
+        <div class="section-header">
+          <h2>Scan</h2>
+          <button id="scanButton" class="primary-button" type="button">Scan Page</button>
+        </div>
+        <p id="scanStatus" class="status-text" role="status">No scan yet.</p>
+      </section>
+
+      <section class="panel">
+        <div class="section-header">
+          <h2>Mode</h2>
+          <div class="segmented-control" role="group" aria-label="Market mode">
+            <button id="mode2Button" class="segment active" type="button" data-mode="2">2-way</button>
+            <button id="mode3Button" class="segment" type="button" data-mode="3">3-way</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="section-header">
+          <h2>Detected Odds</h2>
+          <span id="detectedCount" class="count-pill">0</span>
+        </div>
+        <div id="detectedOdds" class="odds-grid empty-state">Scan a Stake page to detect allowed markets.</div>
+      </section>
+
+      <section class="panel">
+        <div class="section-header">
+          <h2>Selected Odds</h2>
+          <span id="selectionCount" class="count-pill">0 / 2</span>
+        </div>
+        <div id="selectedOdds" class="selected-list"></div>
+      </section>
+
+      <section class="panel">
+        <label class="input-label" for="totalStake">Total stake</label>
+        <input id="totalStake" class="number-input" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="100.00">
+      </section>
+
+      <section class="action-row two-actions">
+        <button id="calculateButton" class="primary-button wide" type="button">Calculate</button>
+        <button id="findArbsButton" class="secondary-button wide" type="button">Find Arbitrage</button>
+      </section>
+
+      <p id="errorMessage" class="error-message" role="alert" aria-live="polite"></p>
+
+      <section id="results" class="results-panel hidden" aria-live="polite"></section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

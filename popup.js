@@ -1,0 +1,1165 @@
+const SCAN_MESSAGE = "STAKE_ARB_SCAN_VISIBLE_TEXT";
+const ODDS_MIN = 1.01;
+const ODDS_MAX = 100;
+const MAX_COMBINATIONS_TO_CHECK = 250000;
+const MAX_ARBITRAGE_RESULTS = 50;
+const ALLOWED_MARKET_DEFINITIONS = [
+  {
+    key: "1x2-1up",
+    title: "1x2 (1UP) Odds",
+    validSearchModes: [3],
+    patterns: [/\b1\s*x\s*2\s*\(?\s*1\s*up\s*\)?/i]
+  },
+  {
+    key: "1x2",
+    title: "1x2 Odds",
+    validSearchModes: [3],
+    patterns: [
+      /\b1\s*x\s*2\b/i,
+      /\b3[-\s]?way\b/i,
+      /\bfull\s*time\s*result\b/i,
+      /\bmatch\s*result\b/i,
+      /\bregular\s*time\s*result\b/i
+    ]
+  },
+  {
+    key: "double-chance",
+    title: "Double Chance Odds",
+    validSearchModes: [2],
+    patterns: [/\bdouble\s*chance\b/i, /\b1x\b/i, /\bx2\b/i, /(^|\s)12(\s|$)/]
+  },
+  {
+    key: "draw-no-bet",
+    title: "Draw No Bet Odds",
+    validSearchModes: [2],
+    patterns: [/\bdraw\s*no\s*bet\b/i, /\bdnb\b/i]
+  }
+];
+const RESTRICTED_MARKET_PATTERNS = [
+  /\banytime\s+goal\s*scorer\b/i,
+  /\banytime\s+goalscorer\b/i,
+  /\bgoal\s*scorer\b/i,
+  /\bgoalscorer\b/i,
+  /\bhalf[-\s]?time\s*\/\s*full[-\s]?time\b/i,
+  /\bhalf\s*time\s+full\s*time\b/i,
+  /\bht\s*\/\s*ft\b/i,
+  /\bhalf[-\s]?time\b/i,
+  /\b1st\s*half\b/i,
+  /\bfirst\s*half\b/i,
+  /\bcorrect\s*score\b/i,
+  /\b1st\s*half\s*correct\s*score\b/i,
+  /\bfirst\s*half\s*correct\s*score\b/i,
+  /\b1\s*x\s*2\s*(and|&|\+)\s*both\s*teams\s*to\s*score\b/i,
+  /\b1\s*x\s*2\s*(and|&|\+)\s*btts\b/i,
+  /\bboth\s*teams\s*to\s*score\b/i,
+  /\bbtts\b/i,
+  /\basian\s*handicap\b/i,
+  /\basian\s*total\b/i,
+  /\b1\s*x\s*2\s*\(?\s*2\s*up\s*\)?/i,
+  /\bmatch\s*winner\b/i,
+  /\bgame\s*winner\b/i,
+  /\bmoney\s*line\b/i,
+  /\bmoneyline\b/i,
+  /\bover\s*\/\s*under\b/i,
+  /\bover\s+under\b/i,
+  /\btotals\b/i,
+  /\btotal\s*(goals|points|runs|rounds|games|sets|maps)?\b/i,
+  /\bhandicap\b/i,
+  /\bspread\b/i,
+  /\bplayer\b/i,
+  /\bprops?\b/i,
+  /\bshots?\b/i,
+  /\bassists?\b/i,
+  /\brebounds?\b/i,
+  /\bcards?\b/i,
+  /\bcorners?\b/i
+];
+
+const state = {
+  mode: 2,
+  detectedOdds: [],
+  detectedGroups: [],
+  selectedOdds: [],
+  arbitrageCandidates: []
+};
+
+const elements = {};
+
+document.addEventListener("DOMContentLoaded", () => {
+  bindElements();
+  bindEvents();
+  renderAll();
+});
+
+function bindElements() {
+  elements.scanButton = document.getElementById("scanButton");
+  elements.calculateButton = document.getElementById("calculateButton");
+  elements.findArbsButton = document.getElementById("findArbsButton");
+  elements.resetButton = document.getElementById("resetButton");
+  elements.mode2Button = document.getElementById("mode2Button");
+  elements.mode3Button = document.getElementById("mode3Button");
+  elements.scanStatus = document.getElementById("scanStatus");
+  elements.detectedCount = document.getElementById("detectedCount");
+  elements.selectionCount = document.getElementById("selectionCount");
+  elements.detectedOdds = document.getElementById("detectedOdds");
+  elements.selectedOdds = document.getElementById("selectedOdds");
+  elements.totalStake = document.getElementById("totalStake");
+  elements.errorMessage = document.getElementById("errorMessage");
+  elements.results = document.getElementById("results");
+}
+
+function bindEvents() {
+  elements.scanButton.addEventListener("click", scanPage);
+  elements.calculateButton.addEventListener("click", calculate);
+  elements.findArbsButton.addEventListener("click", findArbitrageCandidates);
+  elements.resetButton.addEventListener("click", reset);
+  elements.mode2Button.addEventListener("click", () => setMode(2));
+  elements.mode3Button.addEventListener("click", () => setMode(3));
+}
+
+async function scanPage() {
+  clearError();
+  clearResults();
+  setScanStatus("Scanning visible page text...");
+  setBusy(true);
+
+  try {
+    const tab = await getActiveTab();
+
+    if (!tab || !tab.id) {
+      throw new Error("No active tab found.");
+    }
+
+    const response = await requestVisibleText(tab);
+
+    if (!response || !response.ok) {
+      throw new Error("The page did not return visible text.");
+    }
+
+    state.detectedGroups = extractGroupedDecimalOdds(response.text || "");
+    state.detectedOdds = state.detectedGroups.flatMap((group) => group.odds);
+    state.arbitrageCandidates = [];
+    state.selectedOdds = state.selectedOdds.filter((selected) =>
+      state.detectedOdds.some((odds) => odds.id === selected.id)
+    );
+
+    const pageHost = getHost(response.url || tab.url || "");
+    const hostNote = pageHost && !isStakeHost(pageHost)
+      ? " This does not look like a Stake page."
+      : "";
+
+    if (state.detectedOdds.length === 0) {
+      setScanStatus(`No allowed decimal odds were detected.${hostNote}`);
+    } else {
+      const groupText = state.detectedGroups.length === 1 ? "betting type" : "betting types";
+      setScanStatus(`Detected ${state.detectedOdds.length} selections across ${state.detectedGroups.length} ${groupText}.${hostNote}`);
+    }
+
+    renderAll();
+  } catch (error) {
+    setScanStatus("Scan failed.");
+    showError(error.message || "Unable to scan this page.");
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function requestVisibleText(tab) {
+  try {
+    return await sendMessageToTab(tab.id, { type: SCAN_MESSAGE });
+  } catch (_initialError) {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ["content.js"]
+    });
+
+    return sendMessageToTab(tab.id, { type: SCAN_MESSAGE });
+  }
+}
+
+function getActiveTab() {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const error = chrome.runtime.lastError;
+
+      if (error) {
+        reject(new Error(error.message));
+        return;
+      }
+
+      resolve(tabs[0]);
+    });
+  });
+}
+
+function sendMessageToTab(tabId, message) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.sendMessage(tabId, message, (response) => {
+      const error = chrome.runtime.lastError;
+
+      if (error) {
+        reject(new Error(error.message));
+        return;
+      }
+
+      resolve(response);
+    });
+  });
+}
+
+function extractDecimalOdds(text) {
+  return extractGroupedDecimalOdds(text).flatMap((group) => group.odds);
+}
+
+function extractGroupedDecimalOdds(text) {
+  const groups = new Map();
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  let currentMarket = null;
+  let pendingLabels = [];
+  let occurrenceIndex = 0;
+
+  lines.forEach((line) => {
+    const marketState = detectMarketState(line);
+
+    if (marketState.type === "restricted") {
+      currentMarket = null;
+      pendingLabels = [];
+      return;
+    }
+
+    if (marketState.type === "allowed") {
+      currentMarket = marketState.market;
+      pendingLabels = [];
+    }
+
+    const odds = extractOddsFromText(line, pendingLabels, occurrenceIndex);
+    occurrenceIndex += odds.length;
+
+    if (!currentMarket) {
+      return;
+    }
+
+    if (odds.length === 0 && marketState.type !== "allowed" && isPotentialOutcomeLabel(line)) {
+      pendingLabels.push(line);
+      pendingLabels = pendingLabels.slice(-6);
+      return;
+    }
+
+    odds.forEach((item) => {
+      addOddsToGroup(groups, currentMarket, item);
+    });
+  });
+
+  return Array.from(groups.values())
+    .map((group) => ({
+      key: group.key,
+      title: group.title,
+      validSearchModes: group.validSearchModes,
+      firstSeen: group.firstSeen,
+      odds: Array.from(group.odds.values()).sort((a, b) => a.firstSeen - b.firstSeen)
+    }))
+    .filter((group) => group.odds.length > 0)
+    .sort((a, b) => a.firstSeen - b.firstSeen)
+    .map(({ firstSeen: _firstSeen, ...group }) => group);
+}
+
+function detectMarketState(line) {
+  const cleaned = line.replace(/\s+/g, " ").trim();
+
+  if (!cleaned || cleaned.length > 120) {
+    return { type: "none" };
+  }
+
+  if (RESTRICTED_MARKET_PATTERNS.some((pattern) => pattern.test(cleaned))) {
+    return { type: "restricted" };
+  }
+
+  const definition = ALLOWED_MARKET_DEFINITIONS.find((market) =>
+    market.patterns.some((pattern) => pattern.test(cleaned))
+  );
+
+  if (!definition) {
+    return { type: "none" };
+  }
+
+  return {
+    type: "allowed",
+    market: {
+      key: definition.key,
+      title: definition.title,
+      validSearchModes: definition.validSearchModes
+    }
+  };
+}
+
+function extractOddsFromText(text, pendingLabels = [], occurrenceIndexStart = 0) {
+  const matches = [];
+  const oddsRegex = /(^|[^\d.])(\d{1,3}\.\d{2})(?![\d.])/g;
+  let match;
+  let previousEnd = 0;
+
+  while ((match = oddsRegex.exec(text)) !== null) {
+    const oddsText = match[2];
+    const index = match.index + match[1].length;
+    const endIndex = index + oddsText.length;
+    const value = Number(oddsText);
+
+    if (!Number.isFinite(value) || value < ODDS_MIN || value > ODDS_MAX) {
+      previousEnd = endIndex;
+      continue;
+    }
+
+    if (isLikelyNonOdds(text, index, oddsText.length)) {
+      previousEnd = endIndex;
+      continue;
+    }
+
+    const inlineLabel = cleanOutcomeLabel(text.slice(previousEnd, index));
+    const queuedLabel = inlineLabel ? "" : cleanOutcomeLabel(pendingLabels.shift() || "");
+    const outcomeLabel = inlineLabel || queuedLabel || `Outcome ${occurrenceIndexStart + matches.length + 1}`;
+    const outcomeInitials = initialsForOutcome(outcomeLabel);
+    const key = value.toFixed(2);
+
+    matches.push({
+      value,
+      label: key,
+      count: 1,
+      outcomeLabel,
+      outcomeInitials,
+      outcomeKey: normalizeOutcomeKey(outcomeLabel),
+      firstSeen: occurrenceIndexStart + matches.length
+    });
+
+    previousEnd = endIndex;
+  }
+
+  return matches;
+}
+
+function cleanOutcomeLabel(rawLabel) {
+  let label = rawLabel
+    .replace(/\s+/g, " ")
+    .replace(/[|•]/g, " ")
+    .trim();
+
+  const cleaners = [
+    /\b1\s*x\s*2\s*\(?\s*1\s*up\s*\)?/ig,
+    /\b1\s*x\s*2\b/ig,
+    /\bfull\s*time\s*result\b/ig,
+    /\bmatch\s*result\b/ig,
+    /\bregular\s*time\s*result\b/ig,
+    /\bdouble\s*chance\b/ig,
+    /\bdraw\s*no\s*bet\b/ig,
+    /\bdnb\b/ig,
+    /\bodds?\b/ig
+  ];
+
+  cleaners.forEach((pattern) => {
+    label = label.replace(pattern, " ");
+  });
+
+  label = label
+    .replace(/\b(Home|Away)\s*[:.-]\s*/ig, "")
+    .replace(/^[\s:;,./\\\-+]+|[\s:;,./\\\-+]+$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return label.length > 60 ? "" : label;
+}
+
+function isPotentialOutcomeLabel(line) {
+  const label = cleanOutcomeLabel(line);
+
+  if (!label || label.length < 2 || label.length > 60) {
+    return false;
+  }
+
+  if (/\d{1,3}\.\d{2}/.test(label)) {
+    return false;
+  }
+
+  return !/^(show more|show less|suspended|closed|live|cash out|locked|bet builder)$/i.test(label);
+}
+
+function initialsForOutcome(label) {
+  const tokens = label
+    .replace(/[+/]/g, " or ")
+    .replace(/&/g, " and ")
+    .match(/[A-Za-z0-9]+/g);
+
+  if (!tokens || tokens.length === 0) {
+    return "?";
+  }
+
+  return tokens
+    .map((token) => {
+      const lower = token.toLowerCase();
+
+      if (lower === "or") {
+        return "o";
+      }
+
+      if (lower === "and") {
+        return "a";
+      }
+
+      return token.charAt(0).toUpperCase();
+    })
+    .join("");
+}
+
+function normalizeOutcomeKey(label) {
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function formatOddsSelection(odds) {
+  return `${odds.outcomeInitials || "?"} : ${odds.label}`;
+}
+
+function formatOutcomeName(item, fallbackIndex) {
+  if (!item) {
+    return String(fallbackIndex + 1);
+  }
+
+  return item.outcomeInitials || item.outcomeLabel || String(fallbackIndex + 1);
+}
+
+function addOddsToGroup(groups, market, odds) {
+  const groupKey = market.key;
+
+  if (!groups.has(groupKey)) {
+    groups.set(groupKey, {
+      key: groupKey,
+      title: market.title,
+      validSearchModes: market.validSearchModes,
+      firstSeen: groups.size,
+      odds: new Map()
+    });
+  }
+
+  const group = groups.get(groupKey);
+  const key = `${odds.outcomeKey}-${odds.value.toFixed(2)}`;
+  const existing = group.odds.get(key);
+
+  if (existing) {
+    existing.count += odds.count;
+    return;
+  }
+
+  group.odds.set(key, {
+    id: `${groupKey}-${odds.firstSeen}`,
+    value: odds.value,
+    label: odds.label,
+    count: odds.count,
+    outcomeLabel: odds.outcomeLabel,
+    outcomeInitials: odds.outcomeInitials,
+    outcomeKey: odds.outcomeKey,
+    firstSeen: odds.firstSeen,
+    marketKey: groupKey,
+    marketTitle: market.title,
+    validSearchModes: market.validSearchModes
+  });
+}
+
+function isLikelyNonOdds(text, startIndex, length) {
+  const before = text.slice(Math.max(0, startIndex - 24), startIndex).toLowerCase();
+  const after = text.slice(startIndex + length, startIndex + length + 24).toLowerCase();
+  const immediateBefore = text.slice(Math.max(0, startIndex - 2), startIndex);
+  const immediateAfter = text.slice(startIndex + length, startIndex + length + 2);
+  const blockedBeforeLabels = /\b(balance|wallet|deposit|withdraw|cashier|bonus|currency|available|account|profit|loss|payout|usd|eur|gbp|cad|aud|sgd|btc|eth|usdt|ltc|doge|xrp)\b[\s:=-]*$/i;
+  const blockedAfterLabels = /^[\s:=-]*\b(usd|eur|gbp|cad|aud|sgd|btc|eth|usdt|ltc|doge|xrp)\b/i;
+
+  if (/[$€£¥₿]/.test(immediateBefore) || /[$€£¥₿%]/.test(immediateAfter)) {
+    return true;
+  }
+
+  return blockedBeforeLabels.test(before) || blockedAfterLabels.test(after);
+}
+
+function setMode(nextMode) {
+  state.mode = nextMode;
+
+  if (state.selectedOdds.length > state.mode) {
+    state.selectedOdds = state.selectedOdds.slice(0, state.mode);
+  }
+
+  state.arbitrageCandidates = [];
+  clearError();
+  clearResults();
+  renderAll();
+}
+
+function toggleOddsSelection(oddsId) {
+  clearError();
+  clearResults();
+
+  const existingIndex = state.selectedOdds.findIndex((selected) => selected.id === oddsId);
+
+  if (existingIndex >= 0) {
+    state.selectedOdds.splice(existingIndex, 1);
+    renderAll();
+    return;
+  }
+
+  if (state.selectedOdds.length >= state.mode) {
+    showError(`Only ${state.mode} odds can be selected in ${state.mode}-way mode.`);
+    return;
+  }
+
+  const detected = state.detectedOdds.find((odds) => odds.id === oddsId);
+
+  if (!detected) {
+    showError("That detected odd is no longer available.");
+    return;
+  }
+
+  state.selectedOdds.push({
+    id: detected.id,
+    valueText: detected.label,
+    outcomeLabel: detected.outcomeLabel || "",
+    outcomeInitials: detected.outcomeInitials || "",
+    outcomeKey: detected.outcomeKey || "",
+    marketTitle: detected.marketTitle || ""
+  });
+
+  renderAll();
+}
+
+function updateSelectedOdds(index, valueText) {
+  clearError();
+  clearResults();
+
+  if (!state.selectedOdds[index]) {
+    return;
+  }
+
+  state.selectedOdds[index].valueText = valueText;
+}
+
+function removeSelectedOdds(index) {
+  clearError();
+  clearResults();
+  state.selectedOdds.splice(index, 1);
+  renderAll();
+}
+
+function calculate() {
+  clearError();
+  clearResults();
+
+  const totalStake = Number(elements.totalStake.value);
+  const odds = state.selectedOdds.map((selected) => Number(selected.valueText));
+
+  if (state.selectedOdds.length !== state.mode) {
+    showError(`Select exactly ${state.mode} odds before calculating.`);
+    return;
+  }
+
+  if (!Number.isFinite(totalStake) || totalStake <= 0) {
+    showError("Enter a total stake greater than 0.");
+    return;
+  }
+
+  const invalidIndex = odds.findIndex((value) => !Number.isFinite(value) || value <= 1);
+
+  if (invalidIndex >= 0) {
+    showError(`Outcome ${invalidIndex + 1} needs decimal odds greater than 1.00.`);
+    return;
+  }
+
+  renderResults(computeArbitrage(odds, totalStake), state.selectedOdds);
+}
+
+function findArbitrageCandidates() {
+  clearError();
+  clearResults();
+
+  const totalStake = Number(elements.totalStake.value);
+
+  if (!Number.isFinite(totalStake) || totalStake <= 0) {
+    showError("Enter a total stake greater than 0 before searching combinations.");
+    return;
+  }
+
+  if (state.detectedOdds.length < state.mode) {
+    showError("Scan the page first, then choose 2-way or 3-way mode.");
+    return;
+  }
+
+  const searchGroups = state.detectedGroups
+    .map((group) => ({
+      ...group,
+      searchOdds: expandOddsForSearch(group.odds)
+    }))
+    .filter((group) =>
+      Array.isArray(group.validSearchModes) &&
+      group.validSearchModes.includes(state.mode) &&
+      group.searchOdds.length >= state.mode
+    );
+  const combinationsToCheck = searchGroups.reduce(
+    (sum, group) => sum + countCombinations(group.searchOdds.length, state.mode),
+    0
+  );
+
+  if (combinationsToCheck === 0) {
+    showError(`No allowed betting type is compatible with ${state.mode}-way search.`);
+    return;
+  }
+
+  if (combinationsToCheck > MAX_COMBINATIONS_TO_CHECK) {
+    showError(`Too many combinations (${combinationsToCheck.toLocaleString()}) to check safely. Scan a narrower market page.`);
+    return;
+  }
+
+  const candidates = [];
+  let combinationsChecked = 0;
+
+  searchGroups.forEach((group) => {
+    const seenOddsSets = new Set();
+
+    forEachCombination(group.searchOdds, state.mode, (combo) => {
+      const outcomeKeys = new Set(combo.map((odds) => odds.outcomeKey));
+
+      if (outcomeKeys.size !== state.mode) {
+        return;
+      }
+
+      const oddsKey = combo
+        .map((odds) => `${odds.outcomeKey}:${odds.label}`)
+        .sort()
+        .join("|");
+
+      if (seenOddsSets.has(oddsKey)) {
+        return;
+      }
+
+      seenOddsSets.add(oddsKey);
+      combinationsChecked += 1;
+
+      const calculation = computeArbitrage(combo.map((odds) => odds.value), totalStake);
+
+      if (!calculation.arbitrage || calculation.guaranteedReturn <= totalStake) {
+        return;
+      }
+
+      candidates.push({
+        groupKey: group.key,
+        groupTitle: group.title,
+        odds: combo,
+        calculation
+      });
+    });
+  });
+
+  candidates.sort((a, b) =>
+    b.calculation.roi - a.calculation.roi ||
+    a.calculation.totalImplied - b.calculation.totalImplied
+  );
+
+  state.arbitrageCandidates = candidates;
+  renderArbitrageSearchResults(candidates, combinationsChecked, totalStake);
+}
+
+function computeArbitrage(odds, totalStake) {
+  const implied = odds.map((value) => 1 / value);
+  const totalImplied = implied.reduce((sum, value) => sum + value, 0);
+  const arbitrage = totalImplied < 1;
+  const rawStakes = implied.map((value) => totalStake * (value / totalImplied));
+  const displayedStakes = allocateRoundedStakes(rawStakes, totalStake);
+  const returns = displayedStakes.map((stake, index) => stake * odds[index]);
+  const guaranteedReturn = Math.min(...returns);
+  const roi = ((guaranteedReturn - totalStake) / totalStake) * 100;
+
+  return {
+    odds,
+    implied,
+    totalImplied,
+    arbitrage,
+    displayedStakes,
+    returns,
+    guaranteedReturn,
+    roi
+  };
+}
+
+function expandOddsForSearch(oddsList) {
+  return oddsList.map((odds) => ({
+    ...odds,
+    searchId: odds.id
+  }));
+}
+
+function countCombinations(itemCount, chooseCount) {
+  if (chooseCount > itemCount) {
+    return 0;
+  }
+
+  if (chooseCount === 2) {
+    return (itemCount * (itemCount - 1)) / 2;
+  }
+
+  if (chooseCount === 3) {
+    return (itemCount * (itemCount - 1) * (itemCount - 2)) / 6;
+  }
+
+  return 0;
+}
+
+function forEachCombination(items, chooseCount, callback) {
+  if (chooseCount === 2) {
+    for (let first = 0; first < items.length - 1; first += 1) {
+      for (let second = first + 1; second < items.length; second += 1) {
+        callback([items[first], items[second]]);
+      }
+    }
+
+    return;
+  }
+
+  if (chooseCount === 3) {
+    for (let first = 0; first < items.length - 2; first += 1) {
+      for (let second = first + 1; second < items.length - 1; second += 1) {
+        for (let third = second + 1; third < items.length; third += 1) {
+          callback([items[first], items[second], items[third]]);
+        }
+      }
+    }
+  }
+}
+
+function allocateRoundedStakes(rawStakes, totalStake) {
+  const totalCents = Math.round(totalStake * 100);
+  const cents = rawStakes.map((stake) => Math.floor(stake * 100));
+  let remainingCents = totalCents - cents.reduce((sum, value) => sum + value, 0);
+
+  const order = rawStakes
+    .map((stake, index) => ({
+      index,
+      remainder: stake * 100 - Math.floor(stake * 100)
+    }))
+    .sort((a, b) => b.remainder - a.remainder);
+
+  let cursor = 0;
+
+  while (remainingCents > 0 && order.length > 0) {
+    cents[order[cursor % order.length].index] += 1;
+    remainingCents -= 1;
+    cursor += 1;
+  }
+
+  return cents.map((value) => value / 100);
+}
+
+function renderAll() {
+  renderMode();
+  renderDetectedOdds();
+  renderSelectedOdds();
+}
+
+function renderMode() {
+  elements.mode2Button.classList.toggle("active", state.mode === 2);
+  elements.mode3Button.classList.toggle("active", state.mode === 3);
+  elements.selectionCount.textContent = `${state.selectedOdds.length} / ${state.mode}`;
+}
+
+function renderDetectedOdds() {
+  elements.detectedCount.textContent = String(state.detectedOdds.length);
+  elements.detectedOdds.replaceChildren();
+
+  if (state.detectedOdds.length === 0) {
+    elements.detectedOdds.className = "odds-grid empty-state";
+    elements.detectedOdds.textContent = "Scan a Stake page to detect allowed markets: 1x2, 1x2 (1UP), Draw no bet, or Double Chance.";
+    return;
+  }
+
+  elements.detectedOdds.className = "detected-groups";
+
+  state.detectedGroups.forEach((group) => {
+    const section = document.createElement("section");
+    section.className = "market-group";
+
+    const header = document.createElement("div");
+    header.className = "market-header";
+
+    const title = document.createElement("h3");
+    title.className = "market-title";
+    title.textContent = group.title;
+
+    const count = document.createElement("span");
+    count.className = "market-count";
+    count.textContent = `${group.odds.length} selections`;
+
+    const grid = document.createElement("div");
+    grid.className = "market-odds-grid";
+
+    group.odds.forEach((odds) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "odds-chip";
+      chip.classList.toggle("selected", state.selectedOdds.some((selected) => selected.id === odds.id));
+      chip.dataset.oddsId = odds.id;
+      chip.title = `${group.title}: ${odds.outcomeLabel} ${odds.label}`;
+      chip.addEventListener("click", () => toggleOddsSelection(odds.id));
+
+      const benefactor = document.createElement("span");
+      benefactor.className = "odds-benefactor";
+      benefactor.textContent = odds.outcomeInitials || "?";
+
+      const value = document.createElement("span");
+      value.className = "odds-value";
+      value.textContent = `: ${odds.label}`;
+
+      const seenCount = document.createElement("span");
+      seenCount.className = "odds-count";
+      seenCount.textContent = odds.count > 1 ? `${odds.count} seen` : "seen";
+
+      const selection = document.createElement("span");
+      selection.className = "odds-selection";
+      selection.append(benefactor, value);
+
+      chip.append(selection, seenCount);
+      grid.append(chip);
+    });
+
+    header.append(title, count);
+    section.append(header, grid);
+    elements.detectedOdds.append(section);
+  });
+}
+
+function renderSelectedOdds() {
+  elements.selectionCount.textContent = `${state.selectedOdds.length} / ${state.mode}`;
+  elements.selectedOdds.replaceChildren();
+
+  for (let index = 0; index < state.mode; index += 1) {
+    const selected = state.selectedOdds[index];
+
+    if (!selected) {
+      const empty = document.createElement("div");
+      empty.className = "selected-row empty";
+      empty.textContent = `Outcome ${index + 1}: select an odd`;
+      elements.selectedOdds.append(empty);
+      continue;
+    }
+
+    const row = document.createElement("div");
+    row.className = "selected-row";
+
+    const label = document.createElement("label");
+    label.className = "selected-label";
+    label.htmlFor = `selected-odds-${index}`;
+    label.textContent = selected.outcomeInitials || `Outcome ${index + 1}`;
+    label.title = selected.outcomeLabel || `Outcome ${index + 1}`;
+
+    const input = document.createElement("input");
+    input.id = `selected-odds-${index}`;
+    input.className = "number-input";
+    input.type = "number";
+    input.min = "1.01";
+    input.max = "100";
+    input.step = "0.01";
+    input.inputMode = "decimal";
+    input.value = selected.valueText;
+    input.addEventListener("input", (event) => updateSelectedOdds(index, event.target.value));
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "remove-button";
+    remove.title = `Remove outcome ${index + 1}`;
+    remove.textContent = "x";
+    remove.addEventListener("click", () => removeSelectedOdds(index));
+
+    row.append(label, input, remove);
+    elements.selectedOdds.append(row);
+  }
+}
+
+function renderResults(result, outcomeItems = []) {
+  const {
+    odds,
+    implied,
+    totalImplied,
+    arbitrage,
+    displayedStakes,
+    returns,
+    guaranteedReturn,
+    roi
+  } = result;
+
+  elements.results.classList.remove("hidden");
+  elements.results.replaceChildren();
+
+  const banner = document.createElement("div");
+  banner.className = `result-banner ${arbitrage ? "yes" : "no"}`;
+  banner.innerHTML = `<span>Arbitrage</span><strong>${arbitrage ? "YES" : "NO"}</strong>`;
+  elements.results.append(banner);
+
+  const metrics = document.createElement("div");
+  metrics.className = "result-grid";
+  metrics.append(
+    createMetric("Total implied", `${formatPercent(totalImplied)} (${totalImplied.toFixed(4)})`),
+    createMetric("Guaranteed gross", formatMoney(guaranteedReturn)),
+    createMetric("ROI", `${roi.toFixed(2)}%`),
+    createMetric(
+      "Selected odds",
+      odds.map((value, index) => {
+        const item = outcomeItems[index];
+        return item ? `${formatOutcomeName(item, index)}:${value.toFixed(2)}` : value.toFixed(2);
+      }).join(" / ")
+    )
+  );
+  elements.results.append(metrics);
+
+  const table = document.createElement("table");
+  table.className = "result-table";
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th>Outcome</th>
+        <th>Odds</th>
+        <th>Implied</th>
+        <th>Stake</th>
+        <th>Gross return</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  `;
+
+  const tbody = table.querySelector("tbody");
+
+  odds.forEach((value, index) => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${formatOutcomeName(outcomeItems[index], index)}</td>
+      <td>${value.toFixed(2)}</td>
+      <td>${formatPercent(implied[index])}</td>
+      <td>${formatMoney(displayedStakes[index])}</td>
+      <td>${formatMoney(returns[index])}</td>
+    `;
+    tbody.append(row);
+  });
+
+  elements.results.append(table);
+
+  if (!arbitrage) {
+    const warning = document.createElement("div");
+    warning.className = "warning-box";
+    warning.textContent = "Warning: no arbitrage exists with these odds. The calculated split may lock in a loss.";
+    elements.results.append(warning);
+  } else if (roi <= 0) {
+    const warning = document.createElement("div");
+    warning.className = "warning-box";
+    warning.textContent = "Theoretical arbitrage exists, but rounded stake amounts remove the visible profit at this stake size.";
+    elements.results.append(warning);
+  }
+}
+
+function renderArbitrageSearchResults(candidates, combinationsToCheck, totalStake) {
+  const displayedCandidates = candidates.slice(0, MAX_ARBITRAGE_RESULTS);
+  const bestCandidate = candidates[0];
+
+  elements.results.classList.remove("hidden");
+  elements.results.replaceChildren();
+
+  const banner = document.createElement("div");
+  banner.className = `result-banner ${candidates.length > 0 ? "yes" : "no"}`;
+
+  const bannerLabel = document.createElement("span");
+  bannerLabel.textContent = `${state.mode}-way arbitrage candidates`;
+
+  const bannerValue = document.createElement("strong");
+  bannerValue.textContent = String(candidates.length);
+
+  banner.append(bannerLabel, bannerValue);
+  elements.results.append(banner);
+
+  const metrics = document.createElement("div");
+  metrics.className = "result-grid";
+  metrics.append(
+    createMetric("Checked", combinationsToCheck.toLocaleString()),
+    createMetric("Displayed", `${displayedCandidates.length} / ${candidates.length}`),
+    createMetric("Mode", `${state.mode}-way`),
+    createMetric("Best ROI", bestCandidate ? `${bestCandidate.calculation.roi.toFixed(2)}%` : "None")
+  );
+  elements.results.append(metrics);
+
+  if (candidates.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "warning-box";
+    empty.textContent = `No positive guaranteed arbitrage candidates were found for the scanned ${state.mode}-way combinations.`;
+    elements.results.append(empty);
+    return;
+  }
+
+  const warning = document.createElement("div");
+  warning.className = "warning-box";
+  warning.textContent = "These are math-only candidates from visible text. Verify every candidate is from the exact same event, exact same market, and all required outcomes before using the stake split.";
+  elements.results.append(warning);
+
+  const list = document.createElement("div");
+  list.className = "candidate-list";
+
+  displayedCandidates.forEach((candidate, index) => {
+    const card = document.createElement("article");
+    card.className = "candidate-card";
+
+    const header = document.createElement("div");
+    header.className = "candidate-header";
+
+    const title = document.createElement("h3");
+    title.className = "candidate-title";
+    title.textContent = `#${index + 1} ${candidate.groupTitle}`;
+
+    const useButton = document.createElement("button");
+    useButton.type = "button";
+    useButton.className = "small-button";
+    useButton.textContent = "Use";
+    useButton.addEventListener("click", () => loadCandidate(index));
+
+    header.append(title, useButton);
+
+    const summary = document.createElement("div");
+    summary.className = "candidate-summary";
+    summary.append(
+      createCandidateField("Selections", candidate.odds.map(formatOddsSelection).join(" / ")),
+      createCandidateField("Implied", `${formatPercent(candidate.calculation.totalImplied)} (${candidate.calculation.totalImplied.toFixed(4)})`),
+      createCandidateField("ROI", `${candidate.calculation.roi.toFixed(2)}%`),
+      createCandidateField("Guaranteed gross", formatMoney(candidate.calculation.guaranteedReturn)),
+      createCandidateField("Stake split", candidate.calculation.displayedStakes.map((stake) => formatMoney(stake)).join(" / ")),
+      createCandidateField("Gross returns", candidate.calculation.returns.map((grossReturn) => formatMoney(grossReturn)).join(" / "))
+    );
+
+    card.append(header, summary);
+    list.append(card);
+  });
+
+  if (candidates.length > displayedCandidates.length) {
+    const limitNote = document.createElement("div");
+    limitNote.className = "warning-box";
+    limitNote.textContent = `Showing the top ${MAX_ARBITRAGE_RESULTS} candidates by rounded ROI. Narrow the page or market if you need fewer candidates to review.`;
+    list.append(limitNote);
+  }
+
+  elements.results.append(list);
+}
+
+function createCandidateField(label, value) {
+  const field = document.createElement("div");
+  field.className = "candidate-field";
+
+  const labelNode = document.createElement("span");
+  labelNode.className = "candidate-label";
+  labelNode.textContent = label;
+
+  const valueNode = document.createElement("span");
+  valueNode.className = "candidate-value";
+  valueNode.textContent = value;
+
+  field.append(labelNode, valueNode);
+  return field;
+}
+
+function loadCandidate(index) {
+  const candidate = state.arbitrageCandidates[index];
+
+  if (!candidate) {
+    showError("That arbitrage candidate is no longer available.");
+    return;
+  }
+
+  const totalStake = Number(elements.totalStake.value);
+
+  state.selectedOdds = candidate.odds.map((odds, oddsIndex) => ({
+    id: `candidate-${index}-${oddsIndex}-${odds.searchId || odds.id}`,
+    valueText: odds.label,
+    outcomeLabel: odds.outcomeLabel || "",
+    outcomeInitials: odds.outcomeInitials || "",
+    outcomeKey: odds.outcomeKey || "",
+    marketTitle: candidate.groupTitle
+  }));
+
+  clearError();
+  renderAll();
+
+  if (Number.isFinite(totalStake) && totalStake > 0) {
+    renderResults(computeArbitrage(candidate.odds.map((odds) => odds.value), totalStake), candidate.odds);
+  }
+}
+
+function createMetric(label, value) {
+  const metric = document.createElement("div");
+  metric.className = "metric";
+
+  const labelNode = document.createElement("span");
+  labelNode.className = "metric-label";
+  labelNode.textContent = label;
+
+  const valueNode = document.createElement("span");
+  valueNode.className = "metric-value";
+  valueNode.textContent = value;
+
+  metric.append(labelNode, valueNode);
+  return metric;
+}
+
+function reset() {
+  state.mode = 2;
+  state.detectedOdds = [];
+  state.detectedGroups = [];
+  state.selectedOdds = [];
+  state.arbitrageCandidates = [];
+  elements.totalStake.value = "";
+  setScanStatus("No scan yet.");
+  clearError();
+  clearResults();
+  renderAll();
+}
+
+function setBusy(isBusy) {
+  elements.scanButton.disabled = isBusy;
+  elements.calculateButton.disabled = isBusy;
+  elements.findArbsButton.disabled = isBusy;
+}
+
+function setScanStatus(message) {
+  elements.scanStatus.textContent = message;
+}
+
+function showError(message) {
+  elements.errorMessage.textContent = message;
+}
+
+function clearError() {
+  elements.errorMessage.textContent = "";
+}
+
+function clearResults() {
+  elements.results.classList.add("hidden");
+  elements.results.replaceChildren();
+}
+
+function formatMoney(value) {
+  return value.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+}
+
+function formatPercent(value) {
+  return `${(value * 100).toFixed(2)}%`;
+}
+
+function getHost(url) {
+  try {
+    return new URL(url).hostname;
+  } catch (_error) {
+    return "";
+  }
+}
+
+function isStakeHost(hostname) {
+  return hostname === "stake.com" || hostname.endsWith(".stake.com");
+}
