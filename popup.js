@@ -534,19 +534,20 @@ function getMarketDisplayIndex(key) {
 
 function detectMarketState(line) {
   const cleaned = line.replace(/\s+/g, " ").trim();
+  const marketHeading = cleanMarketHeading(cleaned);
 
   if (!cleaned || cleaned.length > 120) {
     return { type: "none" };
   }
 
-  const restrictedCategory = getRestrictedMarketCategory(cleaned);
+  const restrictedCategory = getRestrictedMarketCategory(marketHeading || cleaned);
 
   if (restrictedCategory) {
     return { type: "restricted", category: restrictedCategory };
   }
 
   const definition = ALLOWED_MARKET_DEFINITIONS.find((market) =>
-    market.patterns.some((pattern) => pattern.test(cleaned))
+    market.patterns.some((pattern) => pattern.test(marketHeading))
   );
 
   if (!definition) {
@@ -563,14 +564,18 @@ function detectMarketState(line) {
   };
 }
 
+function cleanMarketHeading(rawHeading) {
+  return rawHeading
+    .replace(/\s+/g, " ")
+    .replace(/^(?:\d{1,3}|[-+])\s*(?:[|:.)-]\s*)/, "")
+    .trim();
+}
+
 function getRestrictedMarketCategory(cleaned) {
   if (
-    /\bhalf[-\s]?time\s*\/\s*full[-\s]?time\b/i.test(cleaned) ||
-    /\bhalf\s*time\s+full\s*time\b/i.test(cleaned) ||
-    /\bht\s*\/\s*ft\b/i.test(cleaned) ||
-    /\bhalf[-\s]?time\b/i.test(cleaned) ||
-    /\b1st\s*half\b/i.test(cleaned) ||
-    /\bfirst\s*half\b/i.test(cleaned)
+    /^half[-\s]?time$/i.test(cleaned) ||
+    /^1st\s*half$/i.test(cleaned) ||
+    /^first\s*half$/i.test(cleaned)
   ) {
     return "half-time";
   }
@@ -579,7 +584,7 @@ function getRestrictedMarketCategory(cleaned) {
 }
 
 function isGenericAllowedHeading(line) {
-  const cleaned = line.replace(/\s+/g, " ").trim();
+  const cleaned = cleanMarketHeading(line.replace(/\s+/g, " ").trim());
 
   return /^(1\s*x\s*2(\s*\(?\s*1\s*up\s*\)?)?|double\s*chance|draw\s*no\s*bet|dnb)$/i.test(cleaned);
 }
@@ -699,6 +704,7 @@ function cleanOutcomeLabel(rawLabel) {
   });
 
   label = label
+    .replace(/^\d{1,3}\s+(?=[A-Za-z])/, "")
     .replace(/\b(Home|Away)\s*[:.-]\s*/ig, "")
     .replace(/^[\s:;,./\\\-+]+|[\s:;,./\\\-+]+$/g, "")
     .replace(/\s+/g, " ")
