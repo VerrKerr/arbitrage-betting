@@ -568,6 +568,7 @@ function cleanMarketHeading(rawHeading) {
   return rawHeading
     .replace(/\s+/g, " ")
     .replace(/^(?:\d{1,3}|[-+])\s*(?:[|:.)-]\s*)/, "")
+    .replace(/^\d{1,3}\s+(?=1\s*x\s*2\b)/i, "")
     .trim();
 }
 
@@ -721,6 +722,10 @@ function isPotentialOutcomeLabel(line) {
   }
 
   if (/\d{1,3}\.\d{2}/.test(label)) {
+    return false;
+  }
+
+  if (/^\d{1,3}$/.test(label)) {
     return false;
   }
 
