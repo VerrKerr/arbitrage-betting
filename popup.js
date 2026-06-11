@@ -11,7 +11,6 @@ const ALLOWED_MARKET_DEFINITIONS = [
     validSearchModes: [3],
     patterns: [
       /^(ft\s+)?1\s*x\s*2(\s+odds)?$/i,
-      /^(ft\s+)?1\s*x\s*2(?:\s*(?:\([^)]*\)|account\b.*|open\b.*|closed\b.*|suspended\b.*|available\b.*))*$/i,
       /^1\s*x\s*2\s*\(?\s*full\s*time\s*\)?$/i,
       /^full\s*time\s+1\s*x\s*2$/i,
       /^3[-\s]?way(\s+odds)?$/i,
@@ -476,8 +475,7 @@ function extractGroupedDecimalOdds(text) {
       pendingLabels = [];
     }
 
-    const oddsLine = marketState.type === "allowed" ? stripMarketHeadingFromLine(line, marketState.market.key) : line;
-    const odds = extractOddsFromText(oddsLine, pendingLabels, occurrenceIndex);
+    const odds = extractOddsFromText(line, pendingLabels, occurrenceIndex);
     occurrenceIndex += odds.length;
 
     if (!currentMarket) {
@@ -536,19 +534,20 @@ function getMarketDisplayIndex(key) {
 
 function detectMarketState(line) {
   const cleaned = line.replace(/\s+/g, " ").trim();
-  const marketHeading = cleanMarketHeading(cleaned);
 
   if (!cleaned || cleaned.length > 120) {
     return { type: "none" };
   }
 
-  const restrictedCategory = getRestrictedMarketCategory(marketHeading || cleaned);
+  const restrictedCategory = getRestrictedMarketCategory(cleaned);
 
   if (restrictedCategory) {
     return { type: "restricted", category: restrictedCategory };
   }
 
-  const definition = ALLOWED_MARKET_DEFINITIONS.find((market) => isAllowedMarketLine(cleaned, market));
+  const definition = ALLOWED_MARKET_DEFINITIONS.find((market) =>
+    market.patterns.some((pattern) => pattern.test(cleaned))
+  );
 
   if (!definition) {
     return { type: "none" };
@@ -564,66 +563,14 @@ function detectMarketState(line) {
   };
 }
 
-function isAllowedMarketLine(line, market) {
-  if (market.key === "1x2") {
-    return Boolean(getOneXTwoHeadingMatch(line));
-  }
-
-  const marketHeading = cleanMarketHeading(line);
-
-  return market.patterns.some((pattern) => pattern.test(marketHeading));
-}
-
-function getOneXTwoHeadingMatch(line) {
-  const cleaned = cleanMarketHeading(line);
-  const match = cleaned.match(/^(?:ft\s+)?1\s*x\s*2(?:\s+odds|\s*\([^)]{0,40}\)|\s+(?:account\s+open|account\s+closed|open|closed|suspended|available))*(?=$|\s)/i);
-
-  if (!match) {
-    return null;
-  }
-
-  const rest = cleaned.slice(match[0].length).trim();
-
-  if (rest && getRestrictedMarketCategory(rest)) {
-    return null;
-  }
-
-  return {
-    rawHeading: match[0],
-    rest
-  };
-}
-
-function stripMarketHeadingFromLine(line, marketKey) {
-  if (marketKey !== "1x2") {
-    return line;
-  }
-
-  const prefixMatch = line.match(/^\s*(?:(?:\d{1,3}|[-+])\s*(?:[|:.)-]\s*)?)?/);
-  const prefix = prefixMatch ? prefixMatch[0] : "";
-  const withoutPrefix = line.slice(prefix.length);
-  const headingMatch = getOneXTwoHeadingMatch(line);
-
-  if (!headingMatch) {
-    return line;
-  }
-
-  return withoutPrefix.slice(headingMatch.rawHeading.length).trim();
-}
-
-function cleanMarketHeading(rawHeading) {
-  return rawHeading
-    .replace(/\s+/g, " ")
-    .replace(/^(?:\d{1,3}|[-+])\s*(?:[|:.)-]\s*)/, "")
-    .replace(/^\d{1,3}\s+(?=1\s*x\s*2\b)/i, "")
-    .trim();
-}
-
 function getRestrictedMarketCategory(cleaned) {
   if (
-    /^half[-\s]?time$/i.test(cleaned) ||
-    /^1st\s*half$/i.test(cleaned) ||
-    /^first\s*half$/i.test(cleaned)
+    /\bhalf[-\s]?time\s*\/\s*full[-\s]?time\b/i.test(cleaned) ||
+    /\bhalf\s*time\s+full\s*time\b/i.test(cleaned) ||
+    /\bht\s*\/\s*ft\b/i.test(cleaned) ||
+    /\bhalf[-\s]?time\b/i.test(cleaned) ||
+    /\b1st\s*half\b/i.test(cleaned) ||
+    /\bfirst\s*half\b/i.test(cleaned)
   ) {
     return "half-time";
   }
@@ -632,7 +579,7 @@ function getRestrictedMarketCategory(cleaned) {
 }
 
 function isGenericAllowedHeading(line) {
-  const cleaned = cleanMarketHeading(line.replace(/\s+/g, " ").trim());
+  const cleaned = line.replace(/\s+/g, " ").trim();
 
   return /^(1\s*x\s*2(\s*\(?\s*1\s*up\s*\)?)?|double\s*chance|draw\s*no\s*bet|dnb)$/i.test(cleaned);
 }
@@ -657,6 +604,15 @@ function addValidatedOddsToGroup(groups, market, oddsList) {
 
 function isValidOneXTwoOddsSet(oddsList) {
   if (oddsList.length !== 3) {
+    return false;
+  }
+
+  const normalizedLabels = oddsList.map((odds) => normalizeOutcomeKey(odds.outcomeLabel || ""));
+  const hasDrawOutcome = normalizedLabels.some((label) =>
+    ["draw", "x", "tie", "d"].includes(label)
+  );
+
+  if (!hasDrawOutcome) {
     return false;
   }
 
@@ -743,7 +699,6 @@ function cleanOutcomeLabel(rawLabel) {
   });
 
   label = label
-    .replace(/^\d{1,3}\s+(?=[A-Za-z])/, "")
     .replace(/\b(Home|Away)\s*[:.-]\s*/ig, "")
     .replace(/^[\s:;,./\\\-+]+|[\s:;,./\\\-+]+$/g, "")
     .replace(/\s+/g, " ")
@@ -760,10 +715,6 @@ function isPotentialOutcomeLabel(line) {
   }
 
   if (/\d{1,3}\.\d{2}/.test(label)) {
-    return false;
-  }
-
-  if (/^\d{1,3}$/.test(label)) {
     return false;
   }
 
