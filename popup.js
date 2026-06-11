@@ -476,7 +476,8 @@ function extractGroupedDecimalOdds(text) {
       pendingLabels = [];
     }
 
-    const odds = extractOddsFromText(line, pendingLabels, occurrenceIndex);
+    const oddsLine = marketState.type === "allowed" ? stripMarketHeadingFromLine(line, marketState.market.key) : line;
+    const odds = extractOddsFromText(oddsLine, pendingLabels, occurrenceIndex);
     occurrenceIndex += odds.length;
 
     if (!currentMarket) {
@@ -547,9 +548,7 @@ function detectMarketState(line) {
     return { type: "restricted", category: restrictedCategory };
   }
 
-  const definition = ALLOWED_MARKET_DEFINITIONS.find((market) =>
-    market.patterns.some((pattern) => pattern.test(marketHeading))
-  );
+  const definition = ALLOWED_MARKET_DEFINITIONS.find((market) => isAllowedMarketLine(cleaned, market));
 
   if (!definition) {
     return { type: "none" };
@@ -563,6 +562,53 @@ function detectMarketState(line) {
       validSearchModes: definition.validSearchModes
     }
   };
+}
+
+function isAllowedMarketLine(line, market) {
+  if (market.key === "1x2") {
+    return Boolean(getOneXTwoHeadingMatch(line));
+  }
+
+  const marketHeading = cleanMarketHeading(line);
+
+  return market.patterns.some((pattern) => pattern.test(marketHeading));
+}
+
+function getOneXTwoHeadingMatch(line) {
+  const cleaned = cleanMarketHeading(line);
+  const match = cleaned.match(/^(?:ft\s+)?1\s*x\s*2(?:\s+odds|\s*\([^)]{0,40}\)|\s+(?:account\s+open|account\s+closed|open|closed|suspended|available))*(?=$|\s)/i);
+
+  if (!match) {
+    return null;
+  }
+
+  const rest = cleaned.slice(match[0].length).trim();
+
+  if (rest && getRestrictedMarketCategory(rest)) {
+    return null;
+  }
+
+  return {
+    rawHeading: match[0],
+    rest
+  };
+}
+
+function stripMarketHeadingFromLine(line, marketKey) {
+  if (marketKey !== "1x2") {
+    return line;
+  }
+
+  const prefixMatch = line.match(/^\s*(?:(?:\d{1,3}|[-+])\s*(?:[|:.)-]\s*)?)?/);
+  const prefix = prefixMatch ? prefixMatch[0] : "";
+  const withoutPrefix = line.slice(prefix.length);
+  const headingMatch = getOneXTwoHeadingMatch(line);
+
+  if (!headingMatch) {
+    return line;
+  }
+
+  return withoutPrefix.slice(headingMatch.rawHeading.length).trim();
 }
 
 function cleanMarketHeading(rawHeading) {
@@ -611,15 +657,6 @@ function addValidatedOddsToGroup(groups, market, oddsList) {
 
 function isValidOneXTwoOddsSet(oddsList) {
   if (oddsList.length !== 3) {
-    return false;
-  }
-
-  const normalizedLabels = oddsList.map((odds) => normalizeOutcomeKey(odds.outcomeLabel || ""));
-  const hasDrawOutcome = normalizedLabels.some((label) =>
-    ["draw", "x", "tie", "d"].includes(label)
-  );
-
-  if (!hasDrawOutcome) {
     return false;
   }
 
