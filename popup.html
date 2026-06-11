@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Stake Arbitrage Calculator</title>
+    <title>Arbitrage Calculator</title>
     <link rel="stylesheet" href="styles.css">
   </head>
   <body>
@@ -11,13 +11,13 @@
       <header class="app-header">
         <div>
           <p class="eyebrow">Private calculator</p>
-          <h1>Stake Arbitrage</h1>
+          <h1>Arbitrage Calculator</h1>
         </div>
         <button id="resetButton" class="icon-button" type="button" title="Reset">Reset</button>
       </header>
 
       <section class="risk-panel" aria-label="Risk controls">
-        <p>This tool only calculates stakes and does not place bets.</p>
+        <p>This tool only calculates amounts and does not place bets.</p>
         <ul>
           <li>Odds can move before bets are placed.</li>
           <li>Check all selected odds are from the exact same event and exact same market.</li>
@@ -51,7 +51,7 @@
           <h2>Detected Odds</h2>
           <span id="detectedCount" class="count-pill">0</span>
         </div>
-        <div id="detectedOdds" class="odds-grid empty-state">Scan a Stake page to detect allowed markets.</div>
+        <div id="detectedOdds" class="odds-grid empty-state">Scan a page to detect allowed markets.</div>
       </section>
 
       <section class="panel">
@@ -63,8 +63,8 @@
       </section>
 
       <section class="panel">
-        <label class="input-label" for="totalStake">Total stake</label>
-        <input id="totalStake" class="number-input" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="100.00">
+        <label class="input-label" for="totalAmount">Total amount</label>
+        <input id="totalAmount" class="number-input" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="100.00">
       </section>
 
       <section class="action-row two-actions">

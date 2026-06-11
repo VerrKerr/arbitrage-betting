@@ -1,4 +1,4 @@
-const SCAN_MESSAGE = "STAKE_ARB_SCAN_VISIBLE_TEXT";
+const SCAN_MESSAGE = "ARB_SCAN_VISIBLE_TEXT";
 const ODDS_MIN = 1.01;
 const ODDS_MAX = 100;
 const MAX_COMBINATIONS_TO_CHECK = 250000;
@@ -103,7 +103,7 @@ function bindElements() {
   elements.selectionCount = document.getElementById("selectionCount");
   elements.detectedOdds = document.getElementById("detectedOdds");
   elements.selectedOdds = document.getElementById("selectedOdds");
-  elements.totalStake = document.getElementById("totalStake");
+  elements.totalAmount = document.getElementById("totalAmount");
   elements.errorMessage = document.getElementById("errorMessage");
   elements.results = document.getElementById("results");
 }
@@ -143,16 +143,11 @@ async function scanPage() {
       state.detectedOdds.some((odds) => odds.id === selected.id)
     );
 
-    const pageHost = getHost(response.url || tab.url || "");
-    const hostNote = pageHost && !isStakeHost(pageHost)
-      ? " This does not look like a Stake page."
-      : "";
-
     if (state.detectedOdds.length === 0) {
-      setScanStatus(`No allowed decimal odds were detected.${hostNote}`);
+      setScanStatus("No allowed decimal odds were detected.");
     } else {
       const groupText = state.detectedGroups.length === 1 ? "betting type" : "betting types";
-      setScanStatus(`Detected ${state.detectedOdds.length} selections across ${state.detectedGroups.length} ${groupText}.${hostNote}`);
+      setScanStatus(`Detected ${state.detectedOdds.length} selections across ${state.detectedGroups.length} ${groupText}.`);
     }
 
     renderAll();
@@ -550,7 +545,7 @@ function calculate() {
   clearError();
   clearResults();
 
-  const totalStake = Number(elements.totalStake.value);
+  const totalAmount = Number(elements.totalAmount.value);
   const odds = state.selectedOdds.map((selected) => Number(selected.valueText));
 
   if (state.selectedOdds.length !== state.mode) {
@@ -558,8 +553,8 @@ function calculate() {
     return;
   }
 
-  if (!Number.isFinite(totalStake) || totalStake <= 0) {
-    showError("Enter a total stake greater than 0.");
+  if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+    showError("Enter a total amount greater than 0.");
     return;
   }
 
@@ -570,17 +565,17 @@ function calculate() {
     return;
   }
 
-  renderResults(computeArbitrage(odds, totalStake), state.selectedOdds);
+  renderResults(computeArbitrage(odds, totalAmount), state.selectedOdds);
 }
 
 function findArbitrageCandidates() {
   clearError();
   clearResults();
 
-  const totalStake = Number(elements.totalStake.value);
+  const totalAmount = Number(elements.totalAmount.value);
 
-  if (!Number.isFinite(totalStake) || totalStake <= 0) {
-    showError("Enter a total stake greater than 0 before searching combinations.");
+  if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+    showError("Enter a total amount greater than 0 before searching combinations.");
     return;
   }
 
@@ -639,9 +634,9 @@ function findArbitrageCandidates() {
       seenOddsSets.add(oddsKey);
       combinationsChecked += 1;
 
-      const calculation = computeArbitrage(combo.map((odds) => odds.value), totalStake);
+      const calculation = computeArbitrage(combo.map((odds) => odds.value), totalAmount);
 
-      if (!calculation.arbitrage || calculation.guaranteedReturn <= totalStake) {
+      if (!calculation.arbitrage || calculation.guaranteedReturn <= totalAmount) {
         return;
       }
 
@@ -660,25 +655,25 @@ function findArbitrageCandidates() {
   );
 
   state.arbitrageCandidates = candidates;
-  renderArbitrageSearchResults(candidates, combinationsChecked, totalStake);
+  renderArbitrageSearchResults(candidates, combinationsChecked, totalAmount);
 }
 
-function computeArbitrage(odds, totalStake) {
+function computeArbitrage(odds, totalAmount) {
   const implied = odds.map((value) => 1 / value);
   const totalImplied = implied.reduce((sum, value) => sum + value, 0);
   const arbitrage = totalImplied < 1;
-  const rawStakes = implied.map((value) => totalStake * (value / totalImplied));
-  const displayedStakes = allocateRoundedStakes(rawStakes, totalStake);
-  const returns = displayedStakes.map((stake, index) => stake * odds[index]);
+  const rawAmounts = implied.map((value) => totalAmount * (value / totalImplied));
+  const displayedAmounts = allocateRoundedAmounts(rawAmounts, totalAmount);
+  const returns = displayedAmounts.map((amount, index) => amount * odds[index]);
   const guaranteedReturn = Math.min(...returns);
-  const roi = ((guaranteedReturn - totalStake) / totalStake) * 100;
+  const roi = ((guaranteedReturn - totalAmount) / totalAmount) * 100;
 
   return {
     odds,
     implied,
     totalImplied,
     arbitrage,
-    displayedStakes,
+    displayedAmounts,
     returns,
     guaranteedReturn,
     roi
@@ -730,15 +725,15 @@ function forEachCombination(items, chooseCount, callback) {
   }
 }
 
-function allocateRoundedStakes(rawStakes, totalStake) {
-  const totalCents = Math.round(totalStake * 100);
-  const cents = rawStakes.map((stake) => Math.floor(stake * 100));
+function allocateRoundedAmounts(rawAmounts, totalAmount) {
+  const totalCents = Math.round(totalAmount * 100);
+  const cents = rawAmounts.map((amount) => Math.floor(amount * 100));
   let remainingCents = totalCents - cents.reduce((sum, value) => sum + value, 0);
 
-  const order = rawStakes
-    .map((stake, index) => ({
+  const order = rawAmounts
+    .map((amount, index) => ({
       index,
-      remainder: stake * 100 - Math.floor(stake * 100)
+      remainder: amount * 100 - Math.floor(amount * 100)
     }))
     .sort((a, b) => b.remainder - a.remainder);
 
@@ -771,7 +766,7 @@ function renderDetectedOdds() {
 
   if (state.detectedOdds.length === 0) {
     elements.detectedOdds.className = "odds-grid empty-state";
-    elements.detectedOdds.textContent = "Scan a Stake page to detect allowed markets: 1x2, 1x2 (1UP), Draw no bet, or Double Chance.";
+    elements.detectedOdds.textContent = "Scan a page to detect allowed markets: 1x2, 1x2 (1UP), Draw no bet, or Double Chance.";
     return;
   }
 
@@ -883,7 +878,7 @@ function renderResults(result, outcomeItems = []) {
     implied,
     totalImplied,
     arbitrage,
-    displayedStakes,
+    displayedAmounts,
     returns,
     guaranteedReturn,
     roi
@@ -921,7 +916,7 @@ function renderResults(result, outcomeItems = []) {
         <th>Outcome</th>
         <th>Odds</th>
         <th>Implied</th>
-        <th>Stake</th>
+        <th>Amount</th>
         <th>Gross return</th>
       </tr>
     </thead>
@@ -936,7 +931,7 @@ function renderResults(result, outcomeItems = []) {
       <td>${formatOutcomeName(outcomeItems[index], index)}</td>
       <td>${value.toFixed(2)}</td>
       <td>${formatPercent(implied[index])}</td>
-      <td>${formatMoney(displayedStakes[index])}</td>
+      <td>${formatMoney(displayedAmounts[index])}</td>
       <td>${formatMoney(returns[index])}</td>
     `;
     tbody.append(row);
@@ -952,12 +947,12 @@ function renderResults(result, outcomeItems = []) {
   } else if (roi <= 0) {
     const warning = document.createElement("div");
     warning.className = "warning-box";
-    warning.textContent = "Theoretical arbitrage exists, but rounded stake amounts remove the visible profit at this stake size.";
+    warning.textContent = "Theoretical arbitrage exists, but rounded amounts remove the visible profit at this amount size.";
     elements.results.append(warning);
   }
 }
 
-function renderArbitrageSearchResults(candidates, combinationsToCheck, totalStake) {
+function renderArbitrageSearchResults(candidates, combinationsToCheck, totalAmount) {
   const displayedCandidates = candidates.slice(0, MAX_ARBITRAGE_RESULTS);
   const bestCandidate = candidates[0];
 
@@ -996,7 +991,7 @@ function renderArbitrageSearchResults(candidates, combinationsToCheck, totalStak
 
   const warning = document.createElement("div");
   warning.className = "warning-box";
-  warning.textContent = "These are math-only candidates from visible text. Verify every candidate is from the exact same event, exact same market, and all required outcomes before using the stake split.";
+  warning.textContent = "These are math-only candidates from visible text. Verify every candidate is from the exact same event, exact same market, and all required outcomes before using the amount split.";
   elements.results.append(warning);
 
   const list = document.createElement("div");
@@ -1028,7 +1023,7 @@ function renderArbitrageSearchResults(candidates, combinationsToCheck, totalStak
       createCandidateField("Implied", `${formatPercent(candidate.calculation.totalImplied)} (${candidate.calculation.totalImplied.toFixed(4)})`),
       createCandidateField("ROI", `${candidate.calculation.roi.toFixed(2)}%`),
       createCandidateField("Guaranteed gross", formatMoney(candidate.calculation.guaranteedReturn)),
-      createCandidateField("Stake split", candidate.calculation.displayedStakes.map((stake) => formatMoney(stake)).join(" / ")),
+      createCandidateField("Amount split", candidate.calculation.displayedAmounts.map((amount) => formatMoney(amount)).join(" / ")),
       createCandidateField("Gross returns", candidate.calculation.returns.map((grossReturn) => formatMoney(grossReturn)).join(" / "))
     );
 
@@ -1070,7 +1065,7 @@ function loadCandidate(index) {
     return;
   }
 
-  const totalStake = Number(elements.totalStake.value);
+  const totalAmount = Number(elements.totalAmount.value);
 
   state.selectedOdds = candidate.odds.map((odds, oddsIndex) => ({
     id: `candidate-${index}-${oddsIndex}-${odds.searchId || odds.id}`,
@@ -1084,8 +1079,8 @@ function loadCandidate(index) {
   clearError();
   renderAll();
 
-  if (Number.isFinite(totalStake) && totalStake > 0) {
-    renderResults(computeArbitrage(candidate.odds.map((odds) => odds.value), totalStake), candidate.odds);
+  if (Number.isFinite(totalAmount) && totalAmount > 0) {
+    renderResults(computeArbitrage(candidate.odds.map((odds) => odds.value), totalAmount), candidate.odds);
   }
 }
 
@@ -1111,7 +1106,7 @@ function reset() {
   state.detectedGroups = [];
   state.selectedOdds = [];
   state.arbitrageCandidates = [];
-  elements.totalStake.value = "";
+  elements.totalAmount.value = "";
   setScanStatus("No scan yet.");
   clearError();
   clearResults();
@@ -1150,16 +1145,4 @@ function formatMoney(value) {
 
 function formatPercent(value) {
   return `${(value * 100).toFixed(2)}%`;
-}
-
-function getHost(url) {
-  try {
-    return new URL(url).hostname;
-  } catch (_error) {
-    return "";
-  }
-}
-
-function isStakeHost(hostname) {
-  return hostname === "stake.com" || hostname.endsWith(".stake.com");
 }

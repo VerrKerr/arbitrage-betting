@@ -1,13 +1,13 @@
-# Stake Arbitrage Calculator
+# Arbitrage Calculator
 
-Private Chrome Extension Manifest V3 calculator for visible decimal odds on Stake.
+Private Chrome Extension Manifest V3 calculator for visible decimal odds.
 
-This extension only calculates stake splits. It does not place bets, click betting buttons, query account APIs, bypass sportsbook protections, automate betting, store data, send data to a backend, or require login. It scans visible `document.body.innerText` only after you click Scan Page, does not display raw page text, only keeps allowed betting-type labels, extracts selections left-to-right, and filters obvious balance or currency-like values before showing odds candidates.
+This extension only calculates amount splits. It does not place bets, click betting buttons, query account APIs, bypass sportsbook protections, automate betting, store data, send data to a backend, or require login. It scans visible `document.body.innerText` only after you click Scan Page, does not display raw page text, only keeps allowed betting-type labels, extracts selections left-to-right, and filters obvious balance or currency-like values before showing odds candidates.
 
 ## Folder Structure
 
 ```text
-stake-arbitrage-calculator/
+arbitrage-calculator/
   manifest.json
   popup.html
   popup.js
@@ -21,42 +21,42 @@ stake-arbitrage-calculator/
 1. Go to `chrome://extensions`.
 2. Enable Developer Mode.
 3. Click Load Unpacked.
-4. Select this project folder: `stake-arbitrage-calculator`.
+4. Select this project folder: `arbitrage-calculator`.
 
-If Stake was already open before installing the extension, reload the Stake tab once.
+If the target page was already open before installing the extension, reload that tab once.
 
-## How To Use On Stake
+## How To Use
 
-1. Open the relevant Stake event or market in Chrome.
+1. Open the relevant event or market page in Chrome.
 2. Open the extension popup.
 3. Click Scan Page.
 4. Review the allowed grouped betting-type sections: 1x2 Odds, 1x2 (1UP) Odds, Draw No Bet Odds, and Double Chance Odds. Each chip is shown as selection initials plus odds, for example `M : 1.08` for Mexico or `MoD : 1.12` for Mexico or Draw.
 5. Select 2 or 3 detected odds from the exact same event and exact same market.
 6. Edit selected odds if needed.
-7. Enter total stake.
+7. Enter total amount.
 8. Click Calculate for manually selected odds, or click Find Arbitrage to search scanned odds in the current 2-way or 3-way mode.
-9. For Find Arbitrage results, manually verify every candidate is from the exact same event, exact same market, and all required outcomes before using the displayed stake split.
+9. For Find Arbitrage results, manually verify every candidate is from the exact same event, exact same market, and all required outcomes before using the displayed amount split.
 10. Recalculate after every odds change.
 
 ## Testing
 
 1. Load the extension in Chrome using Load Unpacked.
-2. Open a Stake page with visible decimal odds.
+2. Open a page with visible decimal odds.
 3. Click Scan Page and confirm decimal odds appear left-to-right as selection chips grouped only under the allowed betting-type headings.
 4. Switch between 2-way and 3-way mode and confirm the selected odds count changes.
-5. Select odds, edit one selected odd, enter a total stake, and click Calculate.
-6. Confirm the result shows arbitrage YES/NO, implied probability, stake split, gross returns, guaranteed gross return, and ROI.
-7. Click Find Arbitrage after entering a total stake and confirm it lists positive guaranteed arbitrage candidates when the scanned odds contain a qualifying 2-way or 3-way combination.
+5. Select odds, edit one selected odd, enter a total amount, and click Calculate.
+6. Confirm the result shows arbitrage YES/NO, implied probability, amount split, gross returns, guaranteed gross return, and ROI.
+7. Click Find Arbitrage after entering a total amount and confirm it lists positive guaranteed arbitrage candidates when the scanned odds contain a qualifying 2-way or 3-way combination.
 8. Click Use on a candidate and confirm it loads into the selected odds calculator.
 9. Try invalid inputs:
    - No selected odds.
    - Only one selected odd in 2-way mode.
-   - Empty or zero total stake.
+   - Empty or zero total amount.
    - Edited odds at or below 1.00.
 
 ## Find Arbitrage
 
-Find Arbitrage searches combinations only inside compatible detected betting-type sections. In 2-way mode it searches Draw No Bet and Double Chance. In 3-way mode it searches 1x2 and 1x2 (1UP). It checks combinations across different extracted selection labels, so two selections with the same decimal odds are still treated separately when their labels differ. It ranks positive guaranteed ROI candidates after rounded stake amounts.
+Find Arbitrage searches combinations only inside compatible detected betting-type sections. In 2-way mode it searches Draw No Bet and Double Chance. In 3-way mode it searches 1x2 and 1x2 (1UP). It checks combinations across different extracted selection labels, so two selections with the same decimal odds are still treated separately when their labels differ. It ranks positive guaranteed ROI candidates after rounded amounts.
 
 The search is intentionally scoped to detected betting-type sections because page text does not reliably expose event boundaries. A candidate can still be invalid if the odds are from different events, similar-but-different markets, suspended markets, or incomplete outcomes. Always verify before acting outside the extension.
 
@@ -91,29 +91,29 @@ Arbitrage exists when:
 sum_implied_probabilities < 1
 ```
 
-Stake for each outcome:
+Amount for each outcome:
 
 ```text
-stake_i = total_stake * ((1 / odds_i) / sum_implied_probabilities)
+amount_i = total_amount * ((1 / odds_i) / sum_implied_probabilities)
 ```
 
 Gross return:
 
 ```text
-return_i = stake_i * odds_i
+return_i = amount_i * odds_i
 ```
 
-The displayed guaranteed gross return uses the lowest return after the displayed stake amounts are rounded to cents.
+The displayed guaranteed gross return uses the lowest return after the displayed amounts are rounded to cents.
 
 ROI:
 
 ```text
-ROI = ((guaranteed_return - total_stake) / total_stake) * 100
+ROI = ((guaranteed_return - total_amount) / total_amount) * 100
 ```
 
 ## Risk Controls
 
-- This tool only calculates stakes and does not place bets.
+- This tool only calculates amounts and does not place bets.
 - Odds can move before bets are placed.
 - Check all selected odds are from the exact same event and exact same market.
 - Do not mix similar but different markets.

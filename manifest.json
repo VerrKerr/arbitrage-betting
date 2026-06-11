@@ -1,19 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "Stake Arbitrage Calculator",
+  "name": "Arbitrage Calculator",
   "version": "1.0.0",
-  "description": "Private calculator for visible decimal odds on Stake. Calculates stake splits only.",
+  "description": "Private calculator for visible decimal odds. Calculates amount splits only.",
   "permissions": ["activeTab", "scripting"],
-  "host_permissions": ["https://stake.com/*", "https://*.stake.com/*"],
   "action": {
-    "default_title": "Stake Arbitrage Calculator",
+    "default_title": "Arbitrage Calculator",
     "default_popup": "popup.html"
-  },
-  "content_scripts": [
-    {
-      "matches": ["https://stake.com/*", "https://*.stake.com/*"],
-      "js": ["content.js"],
-      "run_at": "document_idle"
-    }
-  ]
+  }
 }

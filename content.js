@@ -1,12 +1,12 @@
 (() => {
-  if (window.__stakeArbCalculatorLoaded) {
+  if (window.__arbCalculatorLoaded) {
     return;
   }
 
-  window.__stakeArbCalculatorLoaded = true;
+  window.__arbCalculatorLoaded = true;
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (!message || message.type !== "STAKE_ARB_SCAN_VISIBLE_TEXT") {
+    if (!message || message.type !== "ARB_SCAN_VISIBLE_TEXT") {
       return false;
     }
 
