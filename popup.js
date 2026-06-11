@@ -3,6 +3,7 @@ const ODDS_MIN = 1.01;
 const ODDS_MAX = 100;
 const MAX_COMBINATIONS_TO_CHECK = 250000;
 const MAX_ARBITRAGE_RESULTS = 50;
+const MARKET_DISPLAY_ORDER = ["1x2", "1x2-1up", "draw-no-bet", "double-chance"];
 const ALLOWED_MARKET_DEFINITIONS = [
   {
     key: "1x2-1up",
@@ -344,7 +345,7 @@ function mergeSourceGroups(scanResults) {
       odds: group.odds.sort((a, b) => a.sourceOrder - b.sourceOrder || a.firstSeen - b.firstSeen)
     }))
     .filter((group) => group.odds.length > 0)
-    .sort((a, b) => a.firstSeen - b.firstSeen)
+    .sort(sortMarketGroups)
     .map(({ firstSeen: _firstSeen, ...group }) => group);
 }
 
@@ -415,7 +416,8 @@ function extractGroupedDecimalOdds(text) {
   let currentMarket = null;
   let pendingLabels = [];
   let occurrenceIndex = 0;
-  let restrictedLinesRemaining = 0;
+  let suppressAllowedHeadingLinesRemaining = 0;
+  let suppressedContentLinesRemaining = 0;
 
   lines.forEach((line) => {
     const marketState = detectMarketState(line);
@@ -423,23 +425,33 @@ function extractGroupedDecimalOdds(text) {
     if (marketState.type === "restricted") {
       currentMarket = null;
       pendingLabels = [];
-      restrictedLinesRemaining = 24;
+      suppressAllowedHeadingLinesRemaining = marketState.category === "half-time" ? 4 : 0;
+      suppressedContentLinesRemaining = 0;
       return;
     }
 
-    if (restrictedLinesRemaining > 0) {
-      restrictedLinesRemaining -= 1;
+    if (suppressedContentLinesRemaining > 0 && marketState.type !== "allowed") {
+      suppressedContentLinesRemaining -= 1;
+      currentMarket = null;
+      pendingLabels = [];
+      return;
+    }
 
-      if (marketState.type !== "allowed" || isGenericAllowedHeading(line)) {
-        currentMarket = null;
-        pendingLabels = [];
-        return;
-      }
-
-      restrictedLinesRemaining = 0;
+    if (marketState.type !== "allowed" && suppressAllowedHeadingLinesRemaining > 0) {
+      suppressAllowedHeadingLinesRemaining -= 1;
     }
 
     if (marketState.type === "allowed") {
+      if (suppressAllowedHeadingLinesRemaining > 0 && isGenericAllowedHeading(line)) {
+        currentMarket = null;
+        pendingLabels = [];
+        suppressAllowedHeadingLinesRemaining = 0;
+        suppressedContentLinesRemaining = getSuppressedContentLineCount(marketState.market.key);
+        return;
+      }
+
+      suppressAllowedHeadingLinesRemaining = 0;
+      suppressedContentLinesRemaining = 0;
       currentMarket = marketState.market;
       pendingLabels = [];
     }
@@ -471,8 +483,18 @@ function extractGroupedDecimalOdds(text) {
       odds: Array.from(group.odds.values()).sort((a, b) => a.firstSeen - b.firstSeen)
     }))
     .filter((group) => group.odds.length > 0)
-    .sort((a, b) => a.firstSeen - b.firstSeen)
+    .sort(sortMarketGroups)
     .map(({ firstSeen: _firstSeen, ...group }) => group);
+}
+
+function sortMarketGroups(a, b) {
+  return getMarketDisplayIndex(a.key) - getMarketDisplayIndex(b.key) || a.firstSeen - b.firstSeen;
+}
+
+function getMarketDisplayIndex(key) {
+  const index = MARKET_DISPLAY_ORDER.indexOf(key);
+
+  return index >= 0 ? index : MARKET_DISPLAY_ORDER.length;
 }
 
 function detectMarketState(line) {
@@ -482,8 +504,10 @@ function detectMarketState(line) {
     return { type: "none" };
   }
 
-  if (RESTRICTED_MARKET_PATTERNS.some((pattern) => pattern.test(cleaned))) {
-    return { type: "restricted" };
+  const restrictedCategory = getRestrictedMarketCategory(cleaned);
+
+  if (restrictedCategory) {
+    return { type: "restricted", category: restrictedCategory };
   }
 
   const definition = ALLOWED_MARKET_DEFINITIONS.find((market) =>
@@ -504,10 +528,33 @@ function detectMarketState(line) {
   };
 }
 
+function getRestrictedMarketCategory(cleaned) {
+  if (
+    /\bhalf[-\s]?time\s*\/\s*full[-\s]?time\b/i.test(cleaned) ||
+    /\bhalf\s*time\s+full\s*time\b/i.test(cleaned) ||
+    /\bht\s*\/\s*ft\b/i.test(cleaned) ||
+    /\bhalf[-\s]?time\b/i.test(cleaned) ||
+    /\b1st\s*half\b/i.test(cleaned) ||
+    /\bfirst\s*half\b/i.test(cleaned)
+  ) {
+    return "half-time";
+  }
+
+  return RESTRICTED_MARKET_PATTERNS.some((pattern) => pattern.test(cleaned)) ? "restricted" : "";
+}
+
 function isGenericAllowedHeading(line) {
   const cleaned = line.replace(/\s+/g, " ").trim();
 
   return /^(1\s*x\s*2(\s*\(?\s*1\s*up\s*\)?)?|double\s*chance|draw\s*no\s*bet|dnb)$/i.test(cleaned);
+}
+
+function getSuppressedContentLineCount(marketKey) {
+  if (marketKey === "draw-no-bet") {
+    return 4;
+  }
+
+  return 6;
 }
 
 function extractOddsFromText(text, pendingLabels = [], occurrenceIndexStart = 0) {
