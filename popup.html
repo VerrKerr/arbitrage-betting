@@ -31,7 +31,10 @@
       <section class="panel">
         <div class="section-header">
           <h2>Scan</h2>
-          <button id="scanButton" class="primary-button" type="button">Scan Page</button>
+          <div class="scan-actions">
+            <button id="scanButton" class="primary-button" type="button">Scan Current Tab</button>
+            <button id="scanTabsButton" class="secondary-button" type="button">Scan Open Tabs</button>
+          </div>
         </div>
         <p id="scanStatus" class="status-text" role="status">No scan yet.</p>
       </section>
@@ -49,7 +52,10 @@
       <section class="panel">
         <div class="section-header">
           <h2>Detected Odds</h2>
-          <span id="detectedCount" class="count-pill">0</span>
+          <div class="count-row">
+            <span id="sourceCount" class="count-pill">0 sources</span>
+            <span id="detectedCount" class="count-pill">0</span>
+          </div>
         </div>
         <div id="detectedOdds" class="odds-grid empty-state">Scan a page to detect allowed markets.</div>
       </section>

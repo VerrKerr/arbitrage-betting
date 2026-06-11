@@ -121,6 +121,20 @@ h2 {
   gap: 10px;
 }
 
+.scan-actions,
+.count-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scan-actions .primary-button,
+.scan-actions .secondary-button {
+  min-height: 32px;
+  padding: 0 9px;
+  font-size: 12px;
+}
+
 .status-text {
   margin-top: 8px;
   color: var(--muted);

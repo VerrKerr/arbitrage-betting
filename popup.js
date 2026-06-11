@@ -79,6 +79,8 @@ const state = {
   mode: 2,
   detectedOdds: [],
   detectedGroups: [],
+  scannedTabs: [],
+  scanScope: "none",
   selectedOdds: [],
   arbitrageCandidates: []
 };
@@ -93,6 +95,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 function bindElements() {
   elements.scanButton = document.getElementById("scanButton");
+  elements.scanTabsButton = document.getElementById("scanTabsButton");
   elements.calculateButton = document.getElementById("calculateButton");
   elements.findArbsButton = document.getElementById("findArbsButton");
   elements.resetButton = document.getElementById("resetButton");
@@ -100,6 +103,7 @@ function bindElements() {
   elements.mode3Button = document.getElementById("mode3Button");
   elements.scanStatus = document.getElementById("scanStatus");
   elements.detectedCount = document.getElementById("detectedCount");
+  elements.sourceCount = document.getElementById("sourceCount");
   elements.selectionCount = document.getElementById("selectionCount");
   elements.detectedOdds = document.getElementById("detectedOdds");
   elements.selectedOdds = document.getElementById("selectedOdds");
@@ -109,7 +113,8 @@ function bindElements() {
 }
 
 function bindEvents() {
-  elements.scanButton.addEventListener("click", scanPage);
+  elements.scanButton.addEventListener("click", scanCurrentTab);
+  elements.scanTabsButton.addEventListener("click", scanOpenTabs);
   elements.calculateButton.addEventListener("click", calculate);
   elements.findArbsButton.addEventListener("click", findArbitrageCandidates);
   elements.resetButton.addEventListener("click", reset);
@@ -117,10 +122,10 @@ function bindEvents() {
   elements.mode3Button.addEventListener("click", () => setMode(3));
 }
 
-async function scanPage() {
+async function scanCurrentTab() {
   clearError();
   clearResults();
-  setScanStatus("Scanning visible page text...");
+  setScanStatus("Scanning current tab...");
   setBusy(true);
 
   try {
@@ -130,46 +135,112 @@ async function scanPage() {
       throw new Error("No active tab found.");
     }
 
+    if (!isHttpUrl(tab.url || "")) {
+      throw new Error("Only http and https tabs can be scanned.");
+    }
+
+    await scanTabs([tab], "current");
+  } catch (error) {
+    setScanStatus("Scan failed.");
+    showError(error.message || "Unable to scan this tab.");
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function scanOpenTabs() {
+  clearError();
+  clearResults();
+  setScanStatus("Scanning open tabs in this window...");
+  setBusy(true);
+
+  try {
+    const tabs = await getOpenHttpTabs();
+
+    if (tabs.length === 0) {
+      throw new Error("No open http or https tabs were found in this window.");
+    }
+
+    await scanTabs(tabs, "tabs");
+  } catch (error) {
+    setScanStatus("Scan failed.");
+    showError(error.message || "Unable to scan open tabs.");
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function scanTabs(tabs, scope) {
+  const scanResults = await Promise.all(tabs.map((tab, index) => scanOneTab(tab, index)));
+  const successfulResults = scanResults.filter((result) => result.ok);
+  const failedCount = scanResults.length - successfulResults.length;
+
+  state.scannedTabs = successfulResults.map((result) => result.source);
+  state.scanScope = scope;
+  state.detectedGroups = mergeSourceGroups(successfulResults);
+  state.detectedOdds = state.detectedGroups.flatMap((group) => group.odds);
+  state.arbitrageCandidates = [];
+  state.selectedOdds = state.selectedOdds.filter((selected) =>
+    state.detectedOdds.some((odds) => odds.id === selected.id)
+  );
+
+  if (state.detectedOdds.length === 0) {
+    const failureText = failedCount > 0 ? ` ${failedCount} tab(s) could not be scanned.` : "";
+    setScanStatus(`No allowed decimal odds were detected.${failureText}`);
+  } else {
+    const groupText = state.detectedGroups.length === 1 ? "betting type" : "betting types";
+    const sourceCount = getDistinctSourceCount(state.scannedTabs);
+    const sourceText = sourceCount === 1 ? "source site" : "source sites";
+    const failureText = failedCount > 0 ? ` ${failedCount} tab(s) could not be scanned.` : "";
+    setScanStatus(`Detected ${state.detectedOdds.length} selections across ${state.detectedGroups.length} ${groupText} from ${sourceCount} ${sourceText} in ${state.scannedTabs.length} tab(s).${failureText}`);
+  }
+
+  renderAll();
+}
+
+async function scanOneTab(tab, index) {
+  try {
     const response = await requestVisibleText(tab);
 
     if (!response || !response.ok) {
       throw new Error("The page did not return visible text.");
     }
 
-    state.detectedGroups = extractGroupedDecimalOdds(response.text || "");
-    state.detectedOdds = state.detectedGroups.flatMap((group) => group.odds);
-    state.arbitrageCandidates = [];
-    state.selectedOdds = state.selectedOdds.filter((selected) =>
-      state.detectedOdds.some((odds) => odds.id === selected.id)
-    );
+    const url = response.url || tab.url || "";
+    const source = createSourceFromTab(tab, url, index);
+    const groups = addSourceToGroups(extractGroupedDecimalOdds(response.text || ""), source);
 
-    if (state.detectedOdds.length === 0) {
-      setScanStatus("No allowed decimal odds were detected.");
-    } else {
-      const groupText = state.detectedGroups.length === 1 ? "betting type" : "betting types";
-      setScanStatus(`Detected ${state.detectedOdds.length} selections across ${state.detectedGroups.length} ${groupText}.`);
-    }
-
-    renderAll();
+    return {
+      ok: true,
+      source,
+      groups
+    };
   } catch (error) {
-    setScanStatus("Scan failed.");
-    showError(error.message || "Unable to scan this page.");
-  } finally {
-    setBusy(false);
+    return {
+      ok: false,
+      error: error.message || "Unable to scan tab.",
+      tab
+    };
   }
 }
 
 async function requestVisibleText(tab) {
   try {
-    return await sendMessageToTab(tab.id, { type: SCAN_MESSAGE });
-  } catch (_initialError) {
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files: ["content.js"]
-    });
+    const response = await sendMessageToTab(tab.id, { type: SCAN_MESSAGE });
 
-    return sendMessageToTab(tab.id, { type: SCAN_MESSAGE });
+    if (response && response.ok) {
+      return response;
+    }
+  } catch (_initialError) {
+    // Fall through and inject the content script below.
   }
+
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    files: ["content.js"]
+  });
+
+  return sendMessageToTab(tab.id, { type: SCAN_MESSAGE });
 }
 
 function getActiveTab() {
@@ -183,6 +254,21 @@ function getActiveTab() {
       }
 
       resolve(tabs[0]);
+    });
+  });
+}
+
+function getOpenHttpTabs() {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.query({ currentWindow: true }, (tabs) => {
+      const error = chrome.runtime.lastError;
+
+      if (error) {
+        reject(new Error(error.message));
+        return;
+      }
+
+      resolve(tabs.filter((tab) => isHttpUrl(tab.url || "")));
     });
   });
 }
@@ -202,6 +288,93 @@ function sendMessageToTab(tabId, message) {
   });
 }
 
+function createSourceFromTab(tab, url, index) {
+  const host = getHost(url);
+
+  return {
+    id: String(tab.id || index),
+    order: index,
+    name: getSourceName(host, tab.title || ""),
+    host,
+    title: tab.title || host || `Tab ${index + 1}`,
+    url
+  };
+}
+
+function addSourceToGroups(groups, source) {
+  return groups.map((group) => ({
+    ...group,
+    source,
+    odds: group.odds.map((odds) => ({
+      ...odds,
+      id: `${source.id}-${odds.id}`,
+      sourceId: source.id,
+      sourceOrder: source.order,
+      sourceName: source.name,
+      sourceHost: source.host,
+      sourceTitle: source.title,
+      sourceUrl: source.url
+    }))
+  }));
+}
+
+function mergeSourceGroups(scanResults) {
+  const merged = new Map();
+
+  scanResults.forEach((result) => {
+    result.groups.forEach((group) => {
+      if (!merged.has(group.key)) {
+        merged.set(group.key, {
+          key: group.key,
+          title: group.title,
+          validSearchModes: group.validSearchModes,
+          firstSeen: merged.size,
+          odds: []
+        });
+      }
+
+      merged.get(group.key).odds.push(...group.odds);
+    });
+  });
+
+  return Array.from(merged.values())
+    .map((group) => ({
+      ...group,
+      odds: group.odds.sort((a, b) => a.sourceOrder - b.sourceOrder || a.firstSeen - b.firstSeen)
+    }))
+    .filter((group) => group.odds.length > 0)
+    .sort((a, b) => a.firstSeen - b.firstSeen)
+    .map(({ firstSeen: _firstSeen, ...group }) => group);
+}
+
+function isHttpUrl(url) {
+  return /^https?:\/\//i.test(url);
+}
+
+function getHost(url) {
+  try {
+    return new URL(url).hostname;
+  } catch (_error) {
+    return "";
+  }
+}
+
+function getSourceName(host, title) {
+  if (host) {
+    return host.replace(/^www\./i, "");
+  }
+
+  return title || "Unknown source";
+}
+
+function getSourceKey(odds) {
+  return odds.sourceHost || odds.sourceName || odds.sourceId || "current";
+}
+
+function getDistinctSourceCount(sources) {
+  return new Set(sources.map((source) => source.host || source.name || source.id)).size;
+}
+
 function extractDecimalOdds(text) {
   return extractGroupedDecimalOdds(text).flatMap((group) => group.odds);
 }
@@ -215,6 +388,7 @@ function extractGroupedDecimalOdds(text) {
   let currentMarket = null;
   let pendingLabels = [];
   let occurrenceIndex = 0;
+  let restrictedLinesRemaining = 0;
 
   lines.forEach((line) => {
     const marketState = detectMarketState(line);
@@ -222,7 +396,20 @@ function extractGroupedDecimalOdds(text) {
     if (marketState.type === "restricted") {
       currentMarket = null;
       pendingLabels = [];
+      restrictedLinesRemaining = 24;
       return;
+    }
+
+    if (restrictedLinesRemaining > 0) {
+      restrictedLinesRemaining -= 1;
+
+      if (marketState.type !== "allowed" || isGenericAllowedHeading(line)) {
+        currentMarket = null;
+        pendingLabels = [];
+        return;
+      }
+
+      restrictedLinesRemaining = 0;
     }
 
     if (marketState.type === "allowed") {
@@ -288,6 +475,12 @@ function detectMarketState(line) {
       validSearchModes: definition.validSearchModes
     }
   };
+}
+
+function isGenericAllowedHeading(line) {
+  const cleaned = line.replace(/\s+/g, " ").trim();
+
+  return /^(1\s*x\s*2(\s*\(?\s*1\s*up\s*\)?)?|double\s*chance|draw\s*no\s*bet|dnb)$/i.test(cleaned);
 }
 
 function extractOddsFromText(text, pendingLabels = [], occurrenceIndexStart = 0) {
@@ -410,8 +603,14 @@ function normalizeOutcomeKey(label) {
   return label.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
-function formatOddsSelection(odds) {
-  return `${odds.outcomeInitials || "?"} : ${odds.label}`;
+function formatOddsSelection(odds, includeSource = false) {
+  const selection = `${odds.outcomeInitials || "?"} : ${odds.label}`;
+
+  if (!includeSource || !odds.sourceName) {
+    return selection;
+  }
+
+  return `${selection} @ ${odds.sourceName}`;
 }
 
 function formatOutcomeName(item, fallbackIndex) {
@@ -517,6 +716,8 @@ function toggleOddsSelection(oddsId) {
     outcomeLabel: detected.outcomeLabel || "",
     outcomeInitials: detected.outcomeInitials || "",
     outcomeKey: detected.outcomeKey || "",
+    sourceName: detected.sourceName || "",
+    sourceId: detected.sourceId || "",
     marketTitle: detected.marketTitle || ""
   });
 
@@ -622,8 +823,14 @@ function findArbitrageCandidates() {
         return;
       }
 
+      const sourceKeys = new Set(combo.map(getSourceKey));
+
+      if (state.scanScope === "tabs" && sourceKeys.size < 2) {
+        return;
+      }
+
       const oddsKey = combo
-        .map((odds) => `${odds.outcomeKey}:${odds.label}`)
+        .map((odds) => `${odds.sourceId || "current"}:${odds.outcomeKey}:${odds.label}`)
         .sort()
         .join("|");
 
@@ -643,6 +850,7 @@ function findArbitrageCandidates() {
       candidates.push({
         groupKey: group.key,
         groupTitle: group.title,
+        sourceCount: sourceKeys.size,
         odds: combo,
         calculation
       });
@@ -762,6 +970,8 @@ function renderMode() {
 
 function renderDetectedOdds() {
   elements.detectedCount.textContent = String(state.detectedOdds.length);
+  const sourceCount = getDistinctSourceCount(state.scannedTabs);
+  elements.sourceCount.textContent = `${sourceCount} ${sourceCount === 1 ? "source" : "sources"}`;
   elements.detectedOdds.replaceChildren();
 
   if (state.detectedOdds.length === 0) {
@@ -796,7 +1006,7 @@ function renderDetectedOdds() {
       chip.className = "odds-chip";
       chip.classList.toggle("selected", state.selectedOdds.some((selected) => selected.id === odds.id));
       chip.dataset.oddsId = odds.id;
-      chip.title = `${group.title}: ${odds.outcomeLabel} ${odds.label}`;
+      chip.title = `${group.title}: ${odds.outcomeLabel} ${odds.label}${odds.sourceName ? ` @ ${odds.sourceName}` : ""}`;
       chip.addEventListener("click", () => toggleOddsSelection(odds.id));
 
       const benefactor = document.createElement("span");
@@ -809,7 +1019,7 @@ function renderDetectedOdds() {
 
       const seenCount = document.createElement("span");
       seenCount.className = "odds-count";
-      seenCount.textContent = odds.count > 1 ? `${odds.count} seen` : "seen";
+      seenCount.textContent = odds.sourceName || (odds.count > 1 ? `${odds.count} seen` : "seen");
 
       const selection = document.createElement("span");
       selection.className = "odds-selection";
@@ -847,7 +1057,7 @@ function renderSelectedOdds() {
     label.className = "selected-label";
     label.htmlFor = `selected-odds-${index}`;
     label.textContent = selected.outcomeInitials || `Outcome ${index + 1}`;
-    label.title = selected.outcomeLabel || `Outcome ${index + 1}`;
+    label.title = [selected.outcomeLabel || `Outcome ${index + 1}`, selected.sourceName].filter(Boolean).join(" @ ");
 
     const input = document.createElement("input");
     input.id = `selected-odds-${index}`;
@@ -1019,7 +1229,7 @@ function renderArbitrageSearchResults(candidates, combinationsToCheck, totalAmou
     const summary = document.createElement("div");
     summary.className = "candidate-summary";
     summary.append(
-      createCandidateField("Selections", candidate.odds.map(formatOddsSelection).join(" / ")),
+      createCandidateField("Selections", candidate.odds.map((odds) => formatOddsSelection(odds, true)).join(" / ")),
       createCandidateField("Implied", `${formatPercent(candidate.calculation.totalImplied)} (${candidate.calculation.totalImplied.toFixed(4)})`),
       createCandidateField("ROI", `${candidate.calculation.roi.toFixed(2)}%`),
       createCandidateField("Guaranteed gross", formatMoney(candidate.calculation.guaranteedReturn)),
@@ -1073,6 +1283,8 @@ function loadCandidate(index) {
     outcomeLabel: odds.outcomeLabel || "",
     outcomeInitials: odds.outcomeInitials || "",
     outcomeKey: odds.outcomeKey || "",
+    sourceName: odds.sourceName || "",
+    sourceId: odds.sourceId || "",
     marketTitle: candidate.groupTitle
   }));
 
@@ -1104,6 +1316,8 @@ function reset() {
   state.mode = 2;
   state.detectedOdds = [];
   state.detectedGroups = [];
+  state.scannedTabs = [];
+  state.scanScope = "none";
   state.selectedOdds = [];
   state.arbitrageCandidates = [];
   elements.totalAmount.value = "";
@@ -1115,6 +1329,7 @@ function reset() {
 
 function setBusy(isBusy) {
   elements.scanButton.disabled = isBusy;
+  elements.scanTabsButton.disabled = isBusy;
   elements.calculateButton.disabled = isBusy;
   elements.findArbsButton.disabled = isBusy;
 }

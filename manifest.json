@@ -3,7 +3,8 @@
   "name": "Arbitrage Calculator",
   "version": "1.0.0",
   "description": "Private calculator for visible decimal odds. Calculates amount splits only.",
-  "permissions": ["activeTab", "scripting"],
+  "permissions": ["activeTab", "scripting", "tabs"],
+  "host_permissions": ["http://*/*", "https://*/*"],
   "action": {
     "default_title": "Arbitrage Calculator",
     "default_popup": "popup.html"
