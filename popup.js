@@ -291,11 +291,13 @@ function sendMessageToTab(tabId, message) {
 
 function createSourceFromTab(tab, url, index) {
   const host = getHost(url);
+  const name = getSourceName(host, tab.title || "");
 
   return {
     id: String(tab.id || index),
     order: index,
-    name: getSourceName(host, tab.title || ""),
+    name,
+    shortName: getCompactSourceName(host, name),
     host,
     title: tab.title || host || `Tab ${index + 1}`,
     url
@@ -313,6 +315,7 @@ function addSourceToGroups(groups, source) {
       sourceId: source.id,
       sourceOrder: source.order,
       sourceName: source.name,
+      sourceShortName: source.shortName,
       sourceHost: source.host,
       sourceTitle: source.title,
       sourceUrl: source.url
@@ -367,6 +370,26 @@ function getSourceName(host, title) {
   }
 
   return title || "Unknown source";
+}
+
+function getCompactSourceName(host, fallbackName) {
+  const source = (host || fallbackName || "source").replace(/^www\./i, "");
+  const parts = source.split(".").filter(Boolean);
+
+  if (parts.length >= 2) {
+    const publicSuffixes = new Set(["com", "co", "net", "org", "io", "app", "uk", "au", "sg", "us", "ca"]);
+    const meaningfulParts = parts.filter((part) => !publicSuffixes.has(part.toLowerCase()));
+
+    if (meaningfulParts.length > 0) {
+      return truncateSourceLabel(meaningfulParts[meaningfulParts.length - 1]);
+    }
+  }
+
+  return truncateSourceLabel(source);
+}
+
+function truncateSourceLabel(label) {
+  return label.length > 14 ? `${label.slice(0, 12)}...` : label;
 }
 
 function getSourceKey(odds) {
@@ -684,7 +707,7 @@ function formatOddsSelection(odds, includeSource = false) {
     return selection;
   }
 
-  return `${selection} @ ${odds.sourceName}`;
+  return `${selection} @ ${odds.sourceShortName || odds.sourceName}`;
 }
 
 function formatOutcomeName(item, fallbackIndex) {
@@ -791,6 +814,7 @@ function toggleOddsSelection(oddsId) {
     outcomeInitials: detected.outcomeInitials || "",
     outcomeKey: detected.outcomeKey || "",
     sourceName: detected.sourceName || "",
+    sourceShortName: detected.sourceShortName || "",
     sourceId: detected.sourceId || "",
     marketTitle: detected.marketTitle || ""
   });
@@ -1091,7 +1115,8 @@ function renderDetectedOdds() {
 
       const seenCount = document.createElement("span");
       seenCount.className = "odds-count";
-      seenCount.textContent = odds.sourceName || (odds.count > 1 ? `${odds.count} seen` : "seen");
+      seenCount.textContent = odds.sourceShortName || odds.sourceName || (odds.count > 1 ? `${odds.count} seen` : "seen");
+      seenCount.title = odds.sourceName || "";
 
       const selection = document.createElement("span");
       selection.className = "odds-selection";
@@ -1356,6 +1381,7 @@ function loadCandidate(index) {
     outcomeInitials: odds.outcomeInitials || "",
     outcomeKey: odds.outcomeKey || "",
     sourceName: odds.sourceName || "",
+    sourceShortName: odds.sourceShortName || "",
     sourceId: odds.sourceId || "",
     marketTitle: candidate.groupTitle
   }));

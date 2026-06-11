@@ -308,16 +308,18 @@ h2 {
   position: relative;
   display: flex;
   min-width: 0;
+  overflow: hidden;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 1px;
-  padding: 6px 4px;
+  padding: 7px 4px 6px;
   line-height: 1.1;
 }
 
 .odds-selection {
   display: flex;
+  min-width: 0;
   max-width: 100%;
   align-items: baseline;
   justify-content: center;
@@ -343,9 +345,15 @@ h2 {
 }
 
 .odds-count {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .selected-list {
